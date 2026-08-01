@@ -12,3 +12,5 @@ target_compile_definitions(tst_no_hardcode PRIVATE UTSUSHI_SOURCE_DIR="${CMAKE_S
 utsushi_add_test(tst_page_range)
 
 utsushi_add_test(tst_render_size)
+
+utsushi_add_test(tst_output_path)

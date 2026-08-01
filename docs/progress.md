@@ -20,3 +20,10 @@
   - A4（595.276×841.890pt）@72/150/300/600 DPI の期待値（595×842 / 1240×1754 / 2480×3508 / 4961×7016）はブリーフどおり検算一致。編集なし。
   - 逸脱なし。ブリーフのコード（テスト・ヘッダ・実装）をそのまま転記した。
   - `tst_no_hardcode` は 5 スロット全 green を維持（`magic72OnlyInRenderSize` を含む）。
+- Task 5: 3 つ目の純粋関数群 `utsushi::sanitizedStem(const QString&)` と `utsushi::outputFileName(const QString&, int pageNumber, int totalPages)`（`core/output_path.hpp` / `.cpp`）を追加。Windows の使用禁止文字（`\ / : * ? " < > |`）と制御文字（`\x00`-`\x1f`）を `_` に置換し、NFC 正規化・前後トリムした上で空なら `"output"` を返す `sanitizedStem`、および `"{stem}_p{ゼロ埋めページ番号}.png"` を組み立てる `outputFileName` を実装。ゼロ埋め桁数は総ページ数の桁数（`QString::number(totalPages).size()`）、ただし最低 3 桁。
+  - `core/CMakeLists.txt` のソース一覧に `output_path.hpp output_path.cpp` を追加。`tests/CMakeLists.txt` に `utsushi_add_test(tst_output_path)` を追加。
+  - TDD: `core/output_path.cpp` を `sanitizedStem`/`outputFileName` とも `return QString{};` のみのスタブにして `ctest -R output_path` が 2 passed（`initTestCase`/`cleanupTestCase`）/ 17 failed（データ行すべて）で RED を確認してから本実装に差し替え、`tst_output_path` 19/19 PASS（GREEN）。4 スイート合計（`tst_no_hardcode`/`tst_page_range`/`tst_render_size`/`tst_output_path`）も全 PASS。
+  - 境界値（total=9→3桁, total=10→3桁, total=999→3桁, total=1000→4桁）はブリーフどおり検算一致。
+  - NFD→NFC 行（`stem(nfd-to-nfc)`）の transcribe が単なる恒真式（同一リテラルの比較）に劣化していないことを、ソースファイルとコンパイル後バイナリの両方で確認した: 入力側は 2 コードポイント（U+30DB カタカナ「ホ」+ U+309A 結合半濁点、NFD 分解形）、期待値側は 1 コードポイント（U+30DD カタカナ「ポ」、NFC 合成形）であり、`tests/tst_output_path.cpp` を Python で codepoint 単位に読み直して確認、さらに `build/tests/tst_output_path` バイナリ中に両方の UTF-16LE バイト列（`db309a30` = NFD 2 code units、`dd30` = NFC 1 code unit）が別個に存在することをバイナリ検索で確認した。テストは `sanitizedStem` が NFD 入力を NFC 期待値へ正しく正規化することを検証して PASS。
+  - 逸脱なし。ブリーフのコード（テスト・ヘッダ・実装）をそのまま転記した。Task 3 で発生した `<QList>` 不完全型エラーは today の Qt 6.11.1 環境では再発せず（`output_path.cpp` は追加インクルードなしでビルド成功）。
+  - `tst_no_hardcode` は 5 スロット全 green を維持。`core/output_path.cpp` の `QStringLiteral(R"([\\/:*?"<>|]|[\x00-\x1f])")` は生文字列リテラルだが、内容に禁止トークン（`new`/`72`/`QRegExp`/`throw` 等）を含まないため、スキャナが生文字列を特別扱いしない制限（`tst_no_hardcode.cpp` のコメント参照）による誤検知は発生しない。
