@@ -1,6 +1,7 @@
 #include <QtTest>
 #include <QImage>
 #include <QPainter>
+#include <QPdfDocument>
 #include <QPdfWriter>
 #include <QSignalSpy>
 #include <QTemporaryDir>
@@ -56,10 +57,20 @@ private slots:
         QVERIFY(dir.isValid());
         const QString pdf = writeSamplePdf(dir.path(), u"sample.pdf"_s, 3);
 
+        // フィクスチャの実際のページサイズを読み取る。QPdfWriter + QPageSize::A4 の
+        // 出力は理論値 595.276×841.890pt と厳密には一致しない（整数ポイントに
+        // 丸められることがある）ため、ハードコードした理論値ではなく実測値を
+        // 期待値の計算に使う（Fix round 1, finding 3）。300dpi は理論値と実測値の
+        // 丸め結果が偶然一致しない DPI（150dpi では偶然一致してしまい、この
+        // バグを検出できなかった）。
+        QPdfDocument fixtureDoc;
+        QCOMPARE(fixtureDoc.load(pdf), QPdfDocument::Error::None);
+        const QSizeF actualPageSize = fixtureDoc.pagePointSize(0);
+
         ConversionJob job;
         job.inputPdfPath = pdf;
         job.outputDirPath = dir.path();
-        job.dpi = 150.0;   // 全ページ・150dpi
+        job.dpi = 300.0;   // 全ページ・300dpi
 
         Converter converter;
         QSignalSpy finishedSpy(&converter, &Converter::finished);
@@ -78,7 +89,7 @@ private slots:
             const QString out = dir.path() + u"/sample_p%1.png"_s.arg(page, 3, 10, QLatin1Char('0'));
             QVERIFY2(QFileInfo::exists(out), qPrintable(out));
             const QImage img(out);
-            const auto expected = utsushi::renderSizeFor(QSizeF(595.276, 841.890), 150.0);
+            const auto expected = utsushi::renderSizeFor(actualPageSize, job.dpi);
             QVERIFY(expected.has_value());
             QCOMPARE(img.size(), *expected);
         }
@@ -102,6 +113,94 @@ private slots:
         QVERIFY(!QFileInfo::exists(dir.path() + u"/sel_p001.png"_s));
         QVERIFY(QFileInfo::exists(dir.path() + u"/sel_p002.png"_s));
         QVERIFY(QFileInfo::exists(dir.path() + u"/sel_p004.png"_s));
+    }
+
+    // Fix round 1, finding 1: 出力先が書き込めずバッチを中止したとき、failures に
+    // 理由が記録されるだけでなく failedPages にも数えられていること。
+    // UI は failedPages を件数表示に、failures を詳細一覧に使うため、両者は一致しなければならない。
+    void abortedOutputDirectoryCountsAsFailedPage() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString pdf = writeSamplePdf(dir.path(), u"sample.pdf"_s, 1);
+
+        ConversionJob job;
+        job.inputPdfPath = pdf;
+        job.outputDirPath = dir.path() + u"/does-not-exist"_s;   // 出力先が存在しない
+
+        Converter converter;
+        QSignalSpy finishedSpy(&converter, &Converter::finished);
+        converter.run({job});
+
+        const auto summary = lastSummary(finishedSpy);
+        QVERIFY(summary.aborted);
+        QCOMPARE(summary.failures.size(), 1);
+        QCOMPARE(summary.failedPages, 1);
+        QCOMPARE(summary.succeededPages, 0);
+        QCOMPARE(summary.skippedPages, 0);
+    }
+
+    // Fix round 1, finding 2 (前半): run() が始まる前に requestCancel() が届いていた場合、
+    // その要求を握り潰さず、1 ファイルにも着手せずキャンセル終了すること。
+    void cancelRequestedBeforeRunIsHonored() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString pdf1 = writeSamplePdf(dir.path(), u"a.pdf"_s, 2);
+        const QString pdf2 = writeSamplePdf(dir.path(), u"b.pdf"_s, 2);
+
+        ConversionJob job1;
+        job1.inputPdfPath = pdf1;
+        job1.outputDirPath = dir.path();
+        ConversionJob job2;
+        job2.inputPdfPath = pdf2;
+        job2.outputDirPath = dir.path();
+
+        Converter converter;
+        QSignalSpy finishedSpy(&converter, &Converter::finished);
+        QSignalSpy fileStartedSpy(&converter, &Converter::fileStarted);
+
+        converter.requestCancel();   // run() が始まる前に届いたキャンセル
+        converter.run({job1, job2});
+
+        QCOMPARE(finishedSpy.count(), 1);
+        const auto summary = lastSummary(finishedSpy);
+        QVERIFY(summary.cancelled);
+        QCOMPARE(fileStartedSpy.count(), 0);   // どのファイルにも着手していない
+        QCOMPARE(summary.succeededPages, 0);
+    }
+
+    // Fix round 1, finding 2 (後半): 1 ファイル目の処理完了後・2 ファイル目に着手する前に
+    // キャンセルが要求された場合、2 ファイル目には着手せずキャンセル終了すること
+    // （ファイル境界間でのキャンセルを模擬）。
+    void cancelBetweenFilesIsHonored() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString pdf1 = writeSamplePdf(dir.path(), u"a.pdf"_s, 2);
+        const QString pdf2 = writeSamplePdf(dir.path(), u"b.pdf"_s, 2);
+
+        ConversionJob job1;
+        job1.inputPdfPath = pdf1;
+        job1.outputDirPath = dir.path();
+        ConversionJob job2;
+        job2.inputPdfPath = pdf2;
+        job2.outputDirPath = dir.path();
+
+        Converter converter;
+        QSignalSpy finishedSpy(&converter, &Converter::finished);
+        QSignalSpy fileStartedSpy(&converter, &Converter::fileStarted);
+        // 1 ファイル目の最終ページが完了した直後にキャンセルを要求する。
+        connect(&converter, &Converter::pageDone, &converter, [&converter](int done, int total) {
+            if (done == total) {
+                converter.requestCancel();
+            }
+        });
+
+        converter.run({job1, job2});
+
+        QCOMPARE(finishedSpy.count(), 1);
+        const auto summary = lastSummary(finishedSpy);
+        QVERIFY(summary.cancelled);
+        QCOMPARE(fileStartedSpy.count(), 1);   // 2 ファイル目には着手していない
+        QVERIFY(!QFileInfo::exists(dir.path() + u"/b_p001.png"_s));
     }
 };
 

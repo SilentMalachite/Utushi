@@ -50,13 +50,26 @@ void Converter::requestCancel() {
     m_cancelRequested.store(true, std::memory_order_relaxed);
 }
 
-void Converter::run(const std::vector<ConversionJob>& jobs) {
+void Converter::resetCancel() {
     m_cancelRequested.store(false, std::memory_order_relaxed);
+}
+
+void Converter::run(const std::vector<ConversionJob>& jobs) {
+    // 注意: ここで m_cancelRequested をリセットしない。run() が呼ばれる前に
+    // 届いた requestCancel() を取りこぼさないため（Fix round 1, finding 2）。
+    // 前回バッチの状態を持ち越さない責務は呼び出し側の resetCancel() が担う。
     ConversionSummary summary;
     const int fileCount = static_cast<int>(jobs.size());
     int fileIndex = 0;
 
     for (const ConversionJob& job : jobs) {
+        // ファイル境界でもキャンセルを確認する。run() 開始前に届いたキャンセルも
+        // ここで最初に検出される（1 ファイル目にも着手しない）。
+        if (m_cancelRequested.load(std::memory_order_relaxed)) {
+            summary.cancelled = true;
+            emit finished(summary);
+            return;
+        }
         ++fileIndex;
         emit fileStarted(fileIndex, fileCount, job.inputPdfPath);
 
@@ -67,6 +80,7 @@ void Converter::run(const std::vector<ConversionJob>& jobs) {
             summary.failures.push_back({job.inputPdfPath, 0,
                 QCoreApplication::translate("Converter", "出力先に書き込めません: %1")
                     .arg(job.outputDirPath)});
+            ++summary.failedPages;
             break;
         }
 
