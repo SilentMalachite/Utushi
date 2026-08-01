@@ -1,0 +1,6 @@
+build/
+build-*/
+.DS_Store
+CMakeLists.txt.user
+.superpowers/
+aqtinstall.log
