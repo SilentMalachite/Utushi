@@ -1,0 +1,81 @@
+#include <QtTest>
+#include <QDirIterator>
+#include <QRegularExpression>
+
+using namespace Qt::StringLiterals;
+
+namespace {
+
+QStringList sourceFilesUnder(const QString& subdir) {
+    QStringList files;
+    QDirIterator it(u"" UTSUSHI_SOURCE_DIR "/"_s + subdir,
+                    {u"*.cpp"_s, u"*.hpp"_s}, QDir::Files,
+                    QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        files.append(it.next());
+    }
+    return files;
+}
+
+// subdir 配下の全ソースを走査し、pattern にマッチしたらテストを落とす。
+// allowedFileNames に挙げたファイルだけは走査から除外する。
+void verifyNoMatch(const QString& subdir, const QString& pattern,
+                   const QStringList& allowedFileNames = {}) {
+    const QRegularExpression re(pattern);
+    QVERIFY2(re.isValid(), qPrintable(re.errorString()));
+    const QStringList files = sourceFilesUnder(subdir);
+    for (const QString& path : files) {
+        if (allowedFileNames.contains(QFileInfo(path).fileName())) {
+            continue;
+        }
+        QFile f(path);
+        QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(path));
+        const QString text = QString::fromUtf8(f.readAll());
+        const auto match = re.match(text);
+        QVERIFY2(!match.hasMatch(),
+                 qPrintable(u"%1 に禁止パターン '%2' : \"%3\""_s
+                                .arg(path, pattern, match.captured())));
+    }
+}
+
+} // namespace
+
+class TstNoHardcode : public QObject {
+    Q_OBJECT
+private slots:
+    // core/ に QtWidgets・QMessageBox・qDebug が現れない
+    void coreHasNoWidgetsOrDebug() {
+        verifyNoMatch(u"core"_s,
+                      uR"(#include\s*<QtWidgets|QMessageBox|qDebug)"_s);
+    }
+    // DPI 換算定数 72 は render_size.cpp/.hpp のみ（core/ と app/ を走査）
+    void magic72OnlyInRenderSize() {
+        const QStringList allowed{u"render_size.cpp"_s, u"render_size.hpp"_s};
+        verifyNoMatch(u"core"_s, uR"(\b72\b)"_s, allowed);
+        verifyNoMatch(u"app"_s, uR"(\b72\b)"_s, allowed);
+    }
+    // core/ に生ポインタ new がない（core は unique_ptr のみ。親付き new は app/ 限定）
+    void coreHasNoRawNew() {
+        verifyNoMatch(u"core"_s, uR"(\bnew\b)"_s);
+    }
+    // Qt5 API の不在（全域）
+    void noQt5Api() {
+        const QString pattern =
+            uR"(QRegExp|\bSIGNAL\s*\(|\bSLOT\s*\(|\bforeach\s*\(|\bqrand\b|QString::null)"_s;
+        verifyNoMatch(u"core"_s, pattern);
+        verifyNoMatch(u"app"_s, pattern);
+        // このファイル自身はパターン文字列として禁止語を含むため除外する
+        // （除外しないと自分のソースにマッチして常に失敗する）
+        verifyNoMatch(u"tests"_s, pattern, {u"tst_no_hardcode.cpp"_s});
+    }
+    // 例外・processEvents の不在（全域）
+    void noExceptionsNoProcessEvents() {
+        const QString pattern =
+            uR"(\bthrow\b|\btry\s*\{|\bcatch\s*\(|processEvents)"_s;
+        verifyNoMatch(u"core"_s, pattern);
+        verifyNoMatch(u"app"_s, pattern);
+    }
+};
+
+QTEST_APPLESS_MAIN(TstNoHardcode)
+#include "tst_no_hardcode.moc"

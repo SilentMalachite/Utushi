@@ -20,4 +20,4 @@ endif()
 
 enable_testing()
 add_subdirectory(app)
-# core / tests は最初のソースができるタスク（Task 2, 3）で追加する
+add_subdirectory(tests)
