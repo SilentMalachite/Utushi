@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <QFile>
 #include <QImage>
 #include <QPainter>
 #include <QPdfDocument>
@@ -201,6 +202,160 @@ private slots:
         QVERIFY(summary.cancelled);
         QCOMPARE(fileStartedSpy.count(), 1);   // 2 ファイル目には着手していない
         QVERIFY(!QFileInfo::exists(dir.path() + u"/b_p001.png"_s));
+    }
+
+    // 壊れた PDF を含む 3 ファイルのバッチ: 正常 2 件は変換され、失敗 1 件が理由付きで記録される
+    void batchContinuesAfterBrokenFile() {
+        QTemporaryDir dir;
+        const QString good1 = writeSamplePdf(dir.path(), u"good1.pdf"_s, 2);
+        const QString broken = writeBrokenPdf(dir.path(), u"broken.pdf"_s);
+        const QString good2 = writeSamplePdf(dir.path(), u"good2.pdf"_s, 2);
+
+        std::vector<ConversionJob> jobs;
+        for (const QString& path : {good1, broken, good2}) {
+            ConversionJob job;
+            job.inputPdfPath = path;
+            job.outputDirPath = dir.path();
+            job.dpi = 150.0;
+            jobs.push_back(job);
+        }
+
+        Converter converter;
+        QSignalSpy finishedSpy(&converter, &Converter::finished);
+        converter.run(jobs);
+
+        const auto summary = lastSummary(finishedSpy);
+        QCOMPARE(summary.succeededPages, 4);          // good1 + good2
+        QCOMPARE(summary.failures.size(), std::size_t{1});
+        QCOMPARE(summary.failures.front().filePath, broken);
+        QCOMPARE(summary.failures.front().pageNumber, 0);
+        QVERIFY(!summary.failures.front().reason.isEmpty());
+        QVERIFY(!summary.aborted);                    // 1 件の失敗で全体を止めない
+    }
+
+    // Skip ポリシー: 既存ファイルは上書きされず、中身が変わらない
+    void skipPolicyDoesNotOverwrite() {
+        QTemporaryDir dir;
+        const QString pdf = writeSamplePdf(dir.path(), u"doc.pdf"_s, 1);
+        const QString existing = dir.path() + u"/doc_p001.png"_s;
+        QFile f(existing);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("sentinel");
+        f.close();
+
+        ConversionJob job;
+        job.inputPdfPath = pdf;
+        job.outputDirPath = dir.path();
+        job.dpi = 150.0;
+        job.overwritePolicy = OverwritePolicy::Skip;   // 既定値でもあるが明示
+
+        Converter converter;
+        QSignalSpy finishedSpy(&converter, &Converter::finished);
+        converter.run({job});
+
+        const auto summary = lastSummary(finishedSpy);
+        QCOMPARE(summary.skippedPages, 1);
+        QCOMPARE(summary.succeededPages, 0);
+        QFile check(existing);
+        QVERIFY(check.open(QIODevice::ReadOnly));
+        QCOMPARE(check.readAll(), QByteArray("sentinel"));   // 中身が保存されている
+    }
+
+    // Rename ポリシー: 既存ファイルを残し _2 付きで保存する
+    void renamePolicyAddsSuffix() {
+        QTemporaryDir dir;
+        const QString pdf = writeSamplePdf(dir.path(), u"doc.pdf"_s, 1);
+        const QString existing = dir.path() + u"/doc_p001.png"_s;
+        QFile f(existing);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("sentinel");
+        f.close();
+
+        ConversionJob job;
+        job.inputPdfPath = pdf;
+        job.outputDirPath = dir.path();
+        job.dpi = 150.0;
+        job.overwritePolicy = OverwritePolicy::Rename;
+
+        Converter converter;
+        QSignalSpy finishedSpy(&converter, &Converter::finished);
+        converter.run({job});
+
+        QCOMPARE(lastSummary(finishedSpy).succeededPages, 1);
+        QVERIFY(QFileInfo::exists(dir.path() + u"/doc_p001_2.png"_s));
+        QFile check(existing);
+        QVERIFY(check.open(QIODevice::ReadOnly));
+        QCOMPARE(check.readAll(), QByteArray("sentinel"));
+    }
+
+    // Overwrite ポリシー: 明示指定があるときだけ上書きされる
+    void overwritePolicyReplacesFile() {
+        QTemporaryDir dir;
+        const QString pdf = writeSamplePdf(dir.path(), u"doc.pdf"_s, 1);
+        const QString existing = dir.path() + u"/doc_p001.png"_s;
+        QFile f(existing);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("sentinel");
+        f.close();
+
+        ConversionJob job;
+        job.inputPdfPath = pdf;
+        job.outputDirPath = dir.path();
+        job.dpi = 150.0;
+        job.overwritePolicy = OverwritePolicy::Overwrite;
+
+        Converter converter;
+        QSignalSpy finishedSpy(&converter, &Converter::finished);
+        converter.run({job});
+
+        QCOMPARE(lastSummary(finishedSpy).succeededPages, 1);
+        const QImage img(existing);
+        QVERIFY(!img.isNull());   // PNG として読める = sentinel が置き換わった
+    }
+
+    // キャンセル: フラグが立っていればページ境界で停止し、途中までの PNG は残る
+    // (ファイル内の 1 ページ目完了直後にキャンセルする = ファイル境界ではなく
+    // ページ境界でのキャンセルを検証する。cancelBetweenFilesIsHonored とは別の経路)
+    void cancelStopsAtPageBoundary() {
+        QTemporaryDir dir;
+        const QString pdf = writeSamplePdf(dir.path(), u"doc.pdf"_s, 3);
+
+        ConversionJob job;
+        job.inputPdfPath = pdf;
+        job.outputDirPath = dir.path();
+        job.dpi = 150.0;
+
+        Converter converter;
+        QSignalSpy finishedSpy(&converter, &Converter::finished);
+        // 1 ページ目の完了時にキャンセル → 2 ページ目以降は処理されない
+        connect(&converter, &Converter::pageDone, &converter,
+                [&converter] { converter.requestCancel(); });
+        converter.run({job});
+
+        const auto summary = lastSummary(finishedSpy);
+        QVERIFY(summary.cancelled);
+        QCOMPARE(summary.succeededPages, 1);
+        QVERIFY(QFileInfo::exists(dir.path() + u"/doc_p001.png"_s));   // 途中結果は残る
+        QVERIFY(!QFileInfo::exists(dir.path() + u"/doc_p003.png"_s));
+    }
+
+    // DPI 過大: renderSizeFor が nullopt を返し、ページ失敗として記録される
+    void oversizedDpiFailsPage() {
+        QTemporaryDir dir;
+        const QString pdf = writeSamplePdf(dir.path(), u"doc.pdf"_s, 1);
+
+        ConversionJob job;
+        job.inputPdfPath = pdf;
+        job.outputDirPath = dir.path();
+        job.dpi = 100000.0;   // A4 では 20000px 上限を超える
+
+        Converter converter;
+        QSignalSpy finishedSpy(&converter, &Converter::finished);
+        converter.run({job});
+
+        const auto summary = lastSummary(finishedSpy);
+        QCOMPARE(summary.failedPages, 1);
+        QCOMPARE(summary.failures.front().pageNumber, 1);
     }
 };
 
