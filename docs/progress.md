@@ -13,3 +13,10 @@
   - TDD: `core/page_range.cpp` を `return std::nullopt;` のみのスタブにして `ctest -R page_range` が 9/17 行で FAIL することを確認（RED）してから本実装に差し替え、全 17 行 PASS を確認（GREEN）。
   - 逸脱: ブリーフのコードには無い `#include <QList>` を `page_range.cpp` に追加した。開発機の Qt 6.11.1 では `QStringView::split()` が返す `QList<QStringView>` が `<QString>` からの透過的インクルードだけでは前方宣言止まりで、range-based for がコンパイルエラーになったため（`qcontainerfwd.h` の前方宣言のみでは実体が要る用途に不足）。ロジックはブリーフどおり無変更。
   - `tst_no_hardcode` は今回初めて `core/` に実体のあるコードを走査し、5 スロットすべて green（QtWidgets/QMessageBox/qDebug 不在、マジックナンバー 72 不在、生 `new` 不在、Qt5 API 不在、例外/processEvents 不在）。
+- Task 4: 2 つ目の純粋関数 `utsushi::renderSizeFor(QSizeF pagePointSize, double dpi) noexcept`（`core/render_size.hpp` / `.cpp`）を追加。PDF ページのポイントサイズと DPI から出力ピクセルサイズ（`std::optional<QSize>`）を求める。`px = round(points / 72.0 * dpi)`、幅・高さとも最低 1px 保証、1 辺が `kMaxRenderEdgePx`（20000px）超か `dpi <= 0` かページ辺が 0 以下なら `std::nullopt`。
+  - DPI 換算定数 `utsushi::kScreenDpi = 72` と UI プリセット `utsushi::kStandardDpiPresets = {72, 150, 300, 600}` を `render_size.hpp` に一元化（`tst_no_hardcode::magic72OnlyInRenderSize` が監視。マジックナンバー 72 はこのファイルと `render_size.cpp` にのみ書ける）。Task 7（Converter）と Task 8（DPI コンボ）が両定数と `renderSizeFor` を消費する想定。
+  - `core/CMakeLists.txt` のソース一覧に `render_size.hpp render_size.cpp` を追加。`tests/CMakeLists.txt` に `utsushi_add_test(tst_render_size)` を追加。
+  - TDD: `core/render_size.cpp` を `return std::nullopt;` のみのスタブにして `ctest -R render_size` が 8 passed / 6 failed（`valid=true` の行のみ FAIL）で RED を確認してから本実装に差し替え、14/14 PASS を確認（GREEN）。
+  - A4（595.276×841.890pt）@72/150/300/600 DPI の期待値（595×842 / 1240×1754 / 2480×3508 / 4961×7016）はブリーフどおり検算一致。編集なし。
+  - 逸脱なし。ブリーフのコード（テスト・ヘッダ・実装）をそのまま転記した。
+  - `tst_no_hardcode` は 5 スロット全 green を維持（`magic72OnlyInRenderSize` を含む）。
