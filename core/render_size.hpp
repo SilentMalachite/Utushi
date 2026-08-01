@@ -17,7 +17,7 @@ inline constexpr std::array<int, 4> kStandardDpiPresets{kScreenDpi, 150, 300, 60
 // PDF のページサイズ（ポイント, 1pt = 1/72 inch）と DPI から出力ピクセルサイズを求める。
 // px = round(points / 72.0 * dpi)。幅・高さとも最低 1px を保証する。
 // 副作用なし。例外を投げない。dpi <= 0、ページ辺が 0 以下、
-// 1 辺が kMaxRenderEdgePx 超のとき std::nullopt。
+// dpi またはページ辺が非有限（NaN / 無限大）、1 辺が kMaxRenderEdgePx 超のとき std::nullopt。
 [[nodiscard]] std::optional<QSize> renderSizeFor(QSizeF pagePointSize, double dpi) noexcept;
 
 } // namespace utsushi

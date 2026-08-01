@@ -6,6 +6,10 @@
 namespace utsushi {
 
 std::optional<QSize> renderSizeFor(QSizeF pagePointSize, double dpi) noexcept {
+    if (!std::isfinite(dpi) || !std::isfinite(pagePointSize.width()) ||
+        !std::isfinite(pagePointSize.height())) {
+        return std::nullopt;
+    }
     if (dpi <= 0.0 || pagePointSize.width() <= 0.0 || pagePointSize.height() <= 0.0) {
         return std::nullopt;
     }

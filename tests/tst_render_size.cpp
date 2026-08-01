@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <limits>
 #include "core/render_size.hpp"
 
 using utsushi::renderSizeFor;
@@ -24,6 +25,16 @@ private slots:
         QTest::newRow("dpi-zero")    << a4 << 0.0      << false << QSize();
         QTest::newRow("dpi-negative")<< a4 << -300.0   << false << QSize();
         QTest::newRow("page-zero")   << QSizeF(0.0, 841.890) << 300.0 << false << QSize();
+
+        const double nan = std::numeric_limits<double>::quiet_NaN();
+        const double inf = std::numeric_limits<double>::infinity();
+        QTest::newRow("width-nan")      << QSizeF(nan, 841.890) << 72.0 << false << QSize();
+        QTest::newRow("height-nan")     << QSizeF(595.276, nan) << 72.0 << false << QSize();
+        QTest::newRow("dpi-nan")        << a4                   << nan  << false << QSize();
+        QTest::newRow("dpi-infinity")   << a4                   << inf  << false << QSize();
+        QTest::newRow("width-infinity") << QSizeF(inf, 841.890) << 72.0 << false << QSize();
+        // 21pt @ 36dpi = 10.5px exactly: pins round-half-away-from-zero (-> 11), not the 1px floor.
+        QTest::newRow("half-away-from-zero") << QSizeF(21.0, 100.0) << 36.0 << true << QSize(11, 50);
     }
     void compute() {
         QFETCH(QSizeF, pagePt);
