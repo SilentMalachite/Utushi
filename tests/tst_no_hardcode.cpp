@@ -17,7 +17,95 @@ QStringList sourceFilesUnder(const QString& subdir) {
     return files;
 }
 
+// C++ の // 行コメントと /* ... */ ブロックコメントを空白に置換する。
+// 文字列リテラル ("...") と文字リテラル ('...') の内部は
+// コメント開始記号として解釈しない（バックスラッシュ・エスケープも考慮する）。
+// 生文字列リテラル（R"(...)"）は特別扱いしない
+// （現状の走査対象ソースに出現しないため。将来出現する場合は要見直し）。
+// 改行はそのまま残すため、置換後もテキストの行数・全体長は変化しない。
+QString stripComments(const QString& text) {
+    QString out;
+    out.reserve(text.size());
+    enum class State { Code, LineComment, BlockComment, String, Char };
+    State state = State::Code;
+    const qsizetype n = text.size();
+    for (qsizetype i = 0; i < n; ++i) {
+        const QChar c = text.at(i);
+        const QChar next = (i + 1 < n) ? text.at(i + 1) : QChar();
+        switch (state) {
+        case State::Code:
+            if (c == u'/' && next == u'/') {
+                state = State::LineComment;
+                out += u' ';
+                out += u' ';
+                ++i;
+            } else if (c == u'/' && next == u'*') {
+                state = State::BlockComment;
+                out += u' ';
+                out += u' ';
+                ++i;
+            } else if (c == u'"') {
+                state = State::String;
+                out += c;
+            } else if (c == u'\'') {
+                state = State::Char;
+                out += c;
+            } else {
+                out += c;
+            }
+            break;
+        case State::LineComment:
+            if (c == u'\n') {
+                state = State::Code;
+                out += c;
+            } else {
+                out += u' ';
+            }
+            break;
+        case State::BlockComment:
+            if (c == u'*' && next == u'/') {
+                state = State::Code;
+                out += u' ';
+                out += u' ';
+                ++i;
+            } else if (c == u'\n') {
+                out += c;
+            } else {
+                out += u' ';
+            }
+            break;
+        case State::String:
+            if (c == u'\\' && i + 1 < n) {
+                out += c;
+                out += next;
+                ++i;
+            } else {
+                out += c;
+                if (c == u'"') {
+                    state = State::Code;
+                }
+            }
+            break;
+        case State::Char:
+            if (c == u'\\' && i + 1 < n) {
+                out += c;
+                out += next;
+                ++i;
+            } else {
+                out += c;
+                if (c == u'\'') {
+                    state = State::Code;
+                }
+            }
+            break;
+        }
+    }
+    return out;
+}
+
 // subdir 配下の全ソースを走査し、pattern にマッチしたらテストを落とす。
+// コメント本文は事前に stripComments() で空白に置換してから照合するため、
+// 説明コメント中に禁止語が出現しても誤検知しない（実コードのみを検査する）。
 // allowedFileNames に挙げたファイルだけは走査から除外する。
 void verifyNoMatch(const QString& subdir, const QString& pattern,
                    const QStringList& allowedFileNames = {}) {
@@ -30,7 +118,7 @@ void verifyNoMatch(const QString& subdir, const QString& pattern,
         }
         QFile f(path);
         QVERIFY2(f.open(QIODevice::ReadOnly | QIODevice::Text), qPrintable(path));
-        const QString text = QString::fromUtf8(f.readAll());
+        const QString text = stripComments(QString::fromUtf8(f.readAll()));
         const auto match = re.match(text);
         QVERIFY2(!match.hasMatch(),
                  qPrintable(u"%1 に禁止パターン '%2' : \"%3\""_s
