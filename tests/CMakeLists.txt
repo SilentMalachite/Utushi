@@ -14,3 +14,5 @@ utsushi_add_test(tst_page_range)
 utsushi_add_test(tst_render_size)
 
 utsushi_add_test(tst_output_path)
+
+utsushi_add_test(tst_converter)
