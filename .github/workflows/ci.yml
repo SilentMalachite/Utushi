@@ -86,13 +86,31 @@ jobs:
             exit 1
           fi
 
+      - name: Stage Windows distributable
+        if: runner.os == 'Windows'
+        # Windows のマルチコンフィグ生成物は build/Release/ に app と 5 本のテストバイナリが
+        # 平坦化されて同居する（理由は上の「Read build layout from CMake」参照）。そのディレ
+        # クトリをそのままアーティファクトにすると tst_*.exe まで配布物に混入してしまう。配布に
+        # 必要なファイルだけを新しいディレクトリへ明示的にコピーし（除外リストで弾くのではなく、
+        # 出荷するものだけを積む）、windeployqt もそこへ向けて実行する。
+        shell: bash
+        run: |
+          set -eu
+          stage_dir="dist/windows"
+          mkdir -p "$stage_dir"
+          cp "$EXECUTABLE" "$stage_dir/"
+          cp "$ARTIFACT_DIR/LICENSE" "$stage_dir/"
+          echo "WIN_DIST_DIR=$stage_dir" >> "$GITHUB_ENV"
+
       - name: Deploy (macOS)
         if: runner.os == 'macOS'
         run: macdeployqt "$DEPLOY_TARGET" -verbose=1
 
       - name: Deploy (Windows)
         if: runner.os == 'Windows'
-        run: windeployqt "%DEPLOY_TARGET%"
+        # ステージング先の exe を指定する（ビルドツリーの $DEPLOY_TARGET ではない）。
+        # DLL・プラグインはステージングディレクトリに直接展開される。
+        run: windeployqt "%WIN_DIST_DIR%/utsushi.exe"
         shell: cmd
 
       - name: Verify LICENSE is bundled (macOS)
@@ -117,11 +135,13 @@ jobs:
 
       - name: Verify LICENSE is bundled (Windows)
         if: runner.os == 'Windows'
+        # ビルドツリーではなく、実際にアップロードするステージングディレクトリを検証する。
+        # そうしないとビルドツリーは緑でも出荷物が壊れている、という検証の空振りになる。
         shell: bash
         run: |
           set -eu
-          if [ ! -f "$ARTIFACT_DIR/LICENSE" ]; then
-            echo "::error::LICENSE が ${ARTIFACT_DIR} に同梱されていません。"
+          if [ ! -f "$WIN_DIST_DIR/LICENSE" ]; then
+            echo "::error::LICENSE が ${WIN_DIST_DIR} に同梱されていません。"
             exit 1
           fi
 
@@ -130,8 +150,21 @@ jobs:
         shell: bash
         run: |
           set -eu
-          if ! ls "$ARTIFACT_DIR"/Qt6Core*.dll >/dev/null 2>&1; then
-            echo "::error::windeployqt が Qt の DLL を ${ARTIFACT_DIR} に配置していません。"
+          if ! ls "$WIN_DIST_DIR"/Qt6Core*.dll >/dev/null 2>&1; then
+            echo "::error::windeployqt が Qt の DLL を ${WIN_DIST_DIR} に配置していません。"
+            exit 1
+          fi
+
+      - name: Verify no test binaries in Windows distributable
+        if: runner.os == 'Windows'
+        # 今回の不具合（tst_*.exe が配布物に混入していた）の再発検知用の安全網。ステージング
+        # 手順自体は除外リストではなく明示的な積み込みで実装しているため、この検査が失敗する
+        # ことがあれば、それはステージングの積み込み側で新たに何かが壊れたことを意味する。
+        shell: bash
+        run: |
+          set -eu
+          if ls "$WIN_DIST_DIR"/tst_*.exe >/dev/null 2>&1; then
+            echo "::error::テスト実行ファイルが配布物 ${WIN_DIST_DIR} に混入しています。"
             exit 1
           fi
 
@@ -147,4 +180,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: utsushi-windows-x64
-          path: ${{ env.ARTIFACT_DIR }}
+          path: ${{ env.WIN_DIST_DIR }}
