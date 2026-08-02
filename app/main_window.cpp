@@ -353,10 +353,19 @@ void MainWindow::showSummary(const ConversionSummary& summary,
     m_summaryView->setPlainText(lines.join(u'\n'));
     // 一目で読む状態表示も実際の結果を反映する（Fix round 1, finding 3）。
     // キャンセル・中止のときに「完了」と表示しない。
+    // 全ファイルが事前検査（buildJobs）で弾かれ、1 件も変換を試みていないときも
+    // 同じ理由で「完了」と表示しない。startConversion() の jobs.empty() 早期リターンは
+    // cancelled/aborted のどちらも立てない default 構築の summary を渡すため、
+    // 何もせず summary だけを見ると「完了」に落ちてしまう（Fix wave 2, finding 4）。
+    const bool nothingWasAttempted = !summary.cancelled && !summary.aborted &&
+        summary.succeededPages == 0 && summary.failedPages == 0 &&
+        summary.skippedPages == 0 && !upfrontFailures.empty();
     if (summary.cancelled) {
         m_progressLabel->setText(tr("キャンセルされました"));
     } else if (summary.aborted) {
         m_progressLabel->setText(tr("中止しました"));
+    } else if (nothingWasAttempted) {
+        m_progressLabel->setText(tr("変換できるファイルがありませんでした"));
     } else {
         m_progressLabel->setText(tr("完了"));
     }

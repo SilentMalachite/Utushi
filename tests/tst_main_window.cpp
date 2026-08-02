@@ -1,6 +1,7 @@
 #include <QtTest>
 #include <QComboBox>
 #include <QFile>
+#include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPainter>
@@ -189,6 +190,39 @@ private slots:
             QVERIFY(summarySpy.wait(5000));
         }
         QVERIFY(QFileInfo::exists(dir.path() + u"/doc_p001_2.png"_s));
+    }
+
+    // Fix wave 2, finding 4: buildJobs() が全ファイルを事前検査で弾くと jobs が空になり、
+    // startConversion() は cancelled も aborted も立たない default 構築の summary で
+    // showSummary() を呼ぶ（jobs.empty() の早期リターン）。このとき一目で読む状態表示が
+    // 「完了」のままだと、実際には何も変換していないのに成功したかのように読めてしまう。
+    void statusIsNotDoneWhenEveryFileFailsPreflight() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString missingPdf = dir.path() + u"/missing.pdf"_s;   // 存在しない
+
+        MainWindow window;
+        auto* fileList = window.findChild<QListWidget*>(u"fileList"_s);
+        auto* outputDirEdit = window.findChild<QLineEdit*>(u"outputDirEdit"_s);
+        auto* convertButton = window.findChild<QPushButton*>(u"convertButton"_s);
+        auto* summaryView = window.findChild<QPlainTextEdit*>(u"summaryView"_s);
+        auto* progressLabel = window.findChild<QLabel*>(u"progressLabel"_s);
+        QVERIFY(fileList);
+        QVERIFY(outputDirEdit);
+        QVERIFY(convertButton);
+        QVERIFY(summaryView);
+        QVERIFY(progressLabel);
+
+        fileList->addItem(missingPdf);   // buildJobs() で弾かれる → jobs は空になる
+        outputDirEdit->setText(dir.path());
+
+        // jobs.empty() の早期リターンは同期的に showSummary() を呼ぶので、
+        // ワーカースレッドの完了を待つ必要はない。
+        convertButton->click();
+
+        QVERIFY2(progressLabel->text() != u"完了"_s, qPrintable(progressLabel->text()));
+        QVERIFY2(summaryView->toPlainText().contains(missingPdf),
+                 qPrintable(summaryView->toPlainText()));
     }
 };
 
