@@ -7,7 +7,7 @@
 
 ## 結論
 
-Qt 6.8 LTS / C++20 / CMake で、PDF を PNG 連番画像に変換するデスクトップアプリ **Utsushi（写し）** を作る。
+Qt 6.8 以上（開発機・CI は 6.11.x）/ C++20 / CMake で、PDF を PNG 連番画像に変換するデスクトップアプリ **Utsushi（写し）** を作る。
 PDF のラスタライズは **Qt 標準の QtPdf モジュール（`QPdfDocument`）** のみを使い、Poppler・MuPDF・外部プロセスには依存しない。
 GUI は Qt Widgets。macOS (arm64) と Windows (x64) の2プラットフォームを対象とする。
 

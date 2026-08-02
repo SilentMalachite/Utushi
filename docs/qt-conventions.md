@@ -16,7 +16,7 @@ C++ は 40 年分の書き方が積層しており、AI が生成するコード
 
 - コンパイラ: Apple Clang (macOS) / MSVC 2022 (Windows)
 - 標準: C++20（`CMAKE_CXX_STANDARD 20`, `CXX_STANDARD_REQUIRED ON`, `CXX_EXTENSIONS OFF`）
-- Qt: 6.8 LTS。使用モジュールは `Core` `Gui` `Widgets` `Pdf` `Test` のみ
+- Qt: 6.8 以上（開発機・CI は 6.11.x）。使用モジュールは `Core` `Gui` `Widgets` `Pdf` `Test` のみ
 
 ---
 
