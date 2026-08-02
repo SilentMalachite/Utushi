@@ -39,7 +39,9 @@ QString writeSamplePdf(const QString& dirPath, const QString& name, int pageCoun
 QString writeBrokenPdf(const QString& dirPath, const QString& name) {
     const QString path = dirPath + u'/' + name;
     QFile f(path);
-    f.open(QIODevice::WriteOnly);
+    if (!f.open(QIODevice::WriteOnly)) {
+        return QString();
+    }
     f.write("this is not a pdf");
     return path;
 }
