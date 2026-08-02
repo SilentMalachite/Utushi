@@ -18,11 +18,14 @@ QString sanitizedStem(const QString& stem) {
 }
 
 QString outputFileName(const QString& stem, int pageNumber, int totalPages) {
-    const int digits =
-        std::max<qsizetype>(3, QString::number(totalPages).size());
+    // QString::number(int) の結果は高々 11 文字（INT_MIN は "-2147483648"）に収まる。
+    // qsizetype -> int への変換は、この上限が成り立つこの一点でのみ安全に行える。
+    const int totalPagesDigitCount =
+        static_cast<int>(QString::number(totalPages).size());
+    const int digits = std::max(3, totalPagesDigitCount);
     return QStringLiteral("%1_p%2.png")
         .arg(sanitizedStem(stem))
-        .arg(pageNumber, static_cast<int>(digits), 10, QLatin1Char('0'));
+        .arg(pageNumber, digits, 10, QLatin1Char('0'));
 }
 
 } // namespace utsushi
