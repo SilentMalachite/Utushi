@@ -62,6 +62,11 @@ private:
     Converter* m_converter = nullptr;        // m_workerThread 所有。親は持たせない
     int m_currentFileIndex = 0;
     int m_fileCount = 0;
+    // buildJobs() が事前検査で弾いた失敗（ジョブ化されずワーカーに渡らない）。
+    // startConversion() の先頭でクリアし、run() が finished を emit するまで
+    // 保持する。onFinished() の showSummary() 呼び出しに渡すことで、
+    // 最終サマリからこれらの失敗が消えないようにする（Fix round 1, finding 1）。
+    std::vector<PageFailure> m_upfrontFailures;
 };
 
 } // namespace utsushi

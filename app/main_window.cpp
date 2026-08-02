@@ -32,6 +32,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 }
 
 MainWindow::~MainWindow() {
+    // quit() は「ワーカーのイベントループがアイドルになったら止まる」予約でしか
+    // ない。Converter::run() はバッチが終わる・キャンセルされる・中止されるまで
+    // イベントループへ戻らない同期処理なので、requestCancel() を先に呼ばないと
+    // wait() が残りバッチ全体の完了までブロックし、ウィンドウを閉じる／アプリ
+    // 終了操作が長時間フリーズして見える（Fix round 1, finding 2。150 ページの
+    // ジョブで実測 requestCancel() なし 36.5 秒 → あり 233ms）。
+    // requestCancel() は std::atomic 経由でスレッドをまたいで安全。
+    m_converter->requestCancel();
     m_workerThread.quit();
     m_workerThread.wait();
 }
@@ -235,15 +243,19 @@ void MainWindow::startConversion() {
         m_progressLabel->setText(tr("出力先が書き込み可能なディレクトリではありません"));
         return;
     }
-    std::vector<PageFailure> upfrontFailures;
-    const auto jobs = buildJobs(upfrontFailures);
+    // startConversion() 呼び出しごとにクリア。run() が finished を emit する
+    // （onFinished() が showSummary() を呼ぶ）までメンバとして保持する
+    // （Fix round 1, finding 1: ローカル変数だとスコープを抜けて消え、
+    // 最終サマリから事前検査の失敗が黙って消える）。
+    m_upfrontFailures.clear();
+    const auto jobs = buildJobs(m_upfrontFailures);
     if (jobs.empty()) {
         ConversionSummary empty;
-        showSummary(empty, upfrontFailures);
+        showSummary(empty, m_upfrontFailures);
         return;
     }
     m_summaryView->clear();
-    for (const PageFailure& f : upfrontFailures) {
+    for (const PageFailure& f : m_upfrontFailures) {
         m_summaryView->appendPlainText(tr("[失敗] %1: %2").arg(f.filePath, f.reason));
     }
     setRunning(true);
@@ -276,7 +288,8 @@ void MainWindow::onPageDone(int done, int total) {
 
 void MainWindow::onFinished(const ConversionSummary& summary) {
     setRunning(false);
-    showSummary(summary, {});
+    // {} ではなく m_upfrontFailures を渡す（Fix round 1, finding 1）。
+    showSummary(summary, m_upfrontFailures);
 }
 
 void MainWindow::setRunning(bool running) {
@@ -315,7 +328,15 @@ void MainWindow::showSummary(const ConversionSummary& summary,
         }
     }
     m_summaryView->setPlainText(lines.join(u'\n'));
-    m_progressLabel->setText(tr("完了"));
+    // 一目で読む状態表示も実際の結果を反映する（Fix round 1, finding 3）。
+    // キャンセル・中止のときに「完了」と表示しない。
+    if (summary.cancelled) {
+        m_progressLabel->setText(tr("キャンセルされました"));
+    } else if (summary.aborted) {
+        m_progressLabel->setText(tr("中止しました"));
+    } else {
+        m_progressLabel->setText(tr("完了"));
+    }
 }
 
 } // namespace utsushi
