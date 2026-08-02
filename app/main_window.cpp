@@ -3,6 +3,7 @@
 #include "core/converter.hpp"
 #include "core/page_range.hpp"
 #include "core/render_size.hpp"
+#include "license_dialog.hpp"
 
 #include <QAbstractItemView>
 #include <QComboBox>
@@ -15,6 +16,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMenuBar>
 #include <QPdfDocument>
 #include <QPlainTextEdit>
 #include <QProgressBar>
@@ -135,6 +137,14 @@ void MainWindow::setupUi() {
     connect(m_removeButton, &QPushButton::clicked, this, &MainWindow::removeSelectedFiles);
     connect(m_browseButton, &QPushButton::clicked, this, &MainWindow::chooseOutputDir);
     connect(m_convertButton, &QPushButton::clicked, this, &MainWindow::startConversion);
+
+    // ヘルプメニュー（macOS ではネイティブメニューバーに移る。二重に置かない）
+    auto* helpMenu = menuBar()->addMenu(tr("ヘルプ(&H)"));
+    auto* licenseAction = helpMenu->addAction(tr("ライセンス(&L)"));
+    connect(licenseAction, &QAction::triggered, this, [this] {
+        LicenseDialog dialog(this);
+        dialog.exec();
+    });
 }
 
 void MainWindow::setupWorker() {
