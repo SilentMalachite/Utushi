@@ -419,6 +419,16 @@ private slots:
     // どちらも sanitizedStem() で "a_b" に正規化され、outputFileName() は同じ
     // "a_b_p001.png" を生成する。生の stem だけを比較すると、この衝突をすり抜ける。
     void sanitizedStemCollisionIsReportedAsConflict() {
+#ifdef Q_OS_WIN
+        // ':' と '?' は Windows（NTFS）自体が使用禁止文字としている集合と完全に一致する
+        // （sanitizedStem() が置換する文字はまさに「Windows の使用禁止文字」）。そのため
+        // このテストが検証したい「生の completeBaseName() は異なるが実在するファイルで、
+        // sanitizedStem() を通すと同じ値に丸められる」状況そのものを、Windows では実ファイル
+        // として構築できない（該当パスの作成が OS 側で拒否される）。この衝突検出の一般ロジック
+        // は caseOnlyStemCollisionIsReportedAsConflict / duplicateStemAcrossInputDirsIsReportedAsConflict
+        // など、Windows でも実ファイルとして再現できる他のテストでカバーされている。
+        QSKIP("Windows では ':' '?' を含むファイル名を作成できないため対象外");
+#endif
         QTemporaryDir dirA;
         QTemporaryDir dirB;
         QTemporaryDir outDir;
