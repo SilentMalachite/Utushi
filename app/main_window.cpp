@@ -52,10 +52,13 @@ void MainWindow::setupUi() {
 
     // --- 入力ファイル ---
     m_fileList = new QListWidget(central);
+    m_fileList->setObjectName(QStringLiteral("fileList"));
     m_fileList->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_fileList->setAccessibleName(tr("変換する PDF ファイルの一覧"));
     m_addButton = new QPushButton(tr("ファイルを追加(&A)..."), central);
+    m_addButton->setObjectName(QStringLiteral("addButton"));
     m_removeButton = new QPushButton(tr("選択を削除(&R)"), central);
+    m_removeButton->setObjectName(QStringLiteral("removeButton"));
     auto* fileButtons = new QHBoxLayout;
     fileButtons->addWidget(m_addButton);
     fileButtons->addWidget(m_removeButton);
@@ -67,10 +70,12 @@ void MainWindow::setupUi() {
     // --- 変換設定 ---
     auto* form = new QFormLayout;
     m_pageRangeEdit = new QLineEdit(central);
+    m_pageRangeEdit->setObjectName(QStringLiteral("pageRangeEdit"));
     m_pageRangeEdit->setPlaceholderText(tr("空欄で全ページ。例: 1-5,8,11-"));
     form->addRow(tr("ページ範囲(&P):"), m_pageRangeEdit);
 
     m_dpiCombo = new QComboBox(central);
+    m_dpiCombo->setObjectName(QStringLiteral("dpiCombo"));
     m_dpiCombo->setEditable(true);   // 任意値の入力を許す
     for (const int dpi : kStandardDpiPresets) {
         m_dpiCombo->addItem(QString::number(dpi));
@@ -79,13 +84,16 @@ void MainWindow::setupUi() {
     form->addRow(tr("解像度 DPI(&D):"), m_dpiCombo);
 
     m_outputDirEdit = new QLineEdit(central);
+    m_outputDirEdit->setObjectName(QStringLiteral("outputDirEdit"));
     m_browseButton = new QPushButton(tr("参照(&B)..."), central);
+    m_browseButton->setObjectName(QStringLiteral("browseButton"));
     auto* outRow = new QHBoxLayout;
     outRow->addWidget(m_outputDirEdit);
     outRow->addWidget(m_browseButton);
     form->addRow(tr("出力先(&O):"), outRow);
 
     m_overwriteCombo = new QComboBox(central);
+    m_overwriteCombo->setObjectName(QStringLiteral("overwriteCombo"));
     m_overwriteCombo->addItem(tr("スキップ（既定・上書きしない）"),
                               QVariant::fromValue(static_cast<int>(OverwritePolicy::Skip)));
     m_overwriteCombo->addItem(tr("上書きする"),
@@ -97,8 +105,10 @@ void MainWindow::setupUi() {
 
     // --- 実行・進捗 ---
     m_convertButton = new QPushButton(tr("変換開始(&S)"), central);
+    m_convertButton->setObjectName(QStringLiteral("convertButton"));
     m_convertButton->setDefault(true);
     m_cancelButton = new QPushButton(tr("キャンセル(&C)"), central);
+    m_cancelButton->setObjectName(QStringLiteral("cancelButton"));
     m_cancelButton->setEnabled(false);
     auto* runRow = new QHBoxLayout;
     runRow->addWidget(m_convertButton);
@@ -107,12 +117,15 @@ void MainWindow::setupUi() {
     rootLayout->addLayout(runRow);
 
     m_progressBar = new QProgressBar(central);
+    m_progressBar->setObjectName(QStringLiteral("progressBar"));
     m_progressBar->setTextVisible(false);   // テキストは m_progressLabel で出す
     m_progressLabel = new QLabel(tr("待機中"), central);
+    m_progressLabel->setObjectName(QStringLiteral("progressLabel"));
     rootLayout->addWidget(m_progressBar);
     rootLayout->addWidget(m_progressLabel);
 
     m_summaryView = new QPlainTextEdit(central);
+    m_summaryView->setObjectName(QStringLiteral("summaryView"));
     m_summaryView->setReadOnly(true);
     m_summaryView->setAccessibleName(tr("変換結果サマリ"));
     rootLayout->addWidget(new QLabel(tr("結果:"), central));
