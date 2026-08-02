@@ -30,20 +30,43 @@ QString loadErrorText(QPdfDocument::Error error) {
     }
 }
 
-// Rename ポリシー: report_p001.png → report_p001_2.png, _3, ... の空き番号を返す。
-QString renamedPath(const QDir& dir, const QString& fileName) {
+// Rename ポリシー: report_p001.png → report_p001_2.png, _3, ... の空き番号を確保する。
+// 「exists() で候補を選んでから書く」のではなく、各候補を QIODevice::NewOnly で
+// 実際に排他オープンできるかどうかで確保する。存在確認と書き込みの間に別プロセスが
+// 同じ候補を取ってしまう競合窓をなくすため（2026-08-02 レビュー Blocker 修正）。
+// 成功したら、確保済み（オープン済み）の QFile をそのまま返す。
+std::unique_ptr<QFile> claimRenamedFile(const QDir& dir, const QString& fileName) {
     const QFileInfo info(fileName);
     const QString base = info.completeBaseName();
     const QString ext = info.suffix();
-    for (int n = 2;; ++n) {
-        const QString candidate = dir.filePath(base + u'_' + QString::number(n) + u'.' + ext);
-        if (!QFileInfo::exists(candidate)) {
-            return candidate;
+    // 書き込み不能な状況が続いた場合に無限ループへ陥らないための防御的な上限。
+    // 通常の使用でこの上限に達することはない。
+    constexpr int kMaxRenameAttempts = 10000;
+    for (int n = 2; n <= kMaxRenameAttempts; ++n) {
+        auto file = std::make_unique<QFile>(
+            dir.filePath(base + u'_' + QString::number(n) + u'.' + ext));
+        if (file->open(QIODevice::WriteOnly | QIODevice::NewOnly)) {
+            return file;
         }
     }
+    return nullptr;
 }
 
 } // namespace
+
+bool writeImageExclusive(QFile& file, const QImage& image) {
+    if (image.save(&file, "PNG")) {
+        return true;
+    }
+    // 呼び出し規約により、ここに来る file は「呼び出し側がこの呼び出しの直前に
+    // QIODevice::NewOnly で新規作成した」ものだけ。したがって削除しても、
+    // 他プロセスや以前から存在した既存ファイルを消すことにはならない。
+    // 確保（open）の時点で 0 バイトのファイルが既にディスク上にできているため、
+    // ここで消さないと保存失敗のたびに空の PNG が残る。
+    file.close();
+    file.remove();
+    return false;
+}
 
 Converter::Converter(QObject* parent) : QObject(parent) {}
 
@@ -188,19 +211,45 @@ void Converter::run(const std::vector<ConversionJob>& jobs) {
             }
 
             QString outPath = outDir.filePath(outputFileName(stem, pageNumber, totalPages));
-            if (QFileInfo::exists(outPath)) {
-                if (job.overwritePolicy == OverwritePolicy::Skip) {
+            bool saved = false;
+            if (job.overwritePolicy == OverwritePolicy::Overwrite) {
+                // Overwrite だけはユーザーが明示的に上書きを許可した唯一のポリシー。
+                // 既存ファイルを置き換えてよいので、そのまま保存する。
+                saved = image.save(outPath, "PNG");
+            } else {
+                // Skip/Rename は「exists() で確認してから書く」のではなく、
+                // QIODevice::NewOnly で保存先そのものを排他的に確保してから書く。
+                // 確認と書き込みの間には別プロセス（別の Utsushi インスタンス等）が
+                // 同名ファイルを作れる窓があり、確認後に書くだけでは、その後発の
+                // 書き込みが明示的な Overwrite なしに中身を破壊し得るため
+                // （2026-08-02 レビュー Blocker 修正）。
+                QFile exclusiveOutput(outPath);
+                if (exclusiveOutput.open(QIODevice::WriteOnly | QIODevice::NewOnly)) {
+                    saved = writeImageExclusive(exclusiveOutput, image);
+                } else if (job.overwritePolicy == OverwritePolicy::Skip) {
+                    // 確保できなかった = 保存先は既に何かで埋まっている。書かずに次へ進む。
                     ++summary.skippedPages;
                     ++doneInFile;
                     emit pageDone(doneInFile, plannedInFile);
                     continue;
+                } else {
+                    // Rename: 空いている "_N" 候補を、確認してから書くのではなく
+                    // 1 つずつ実際に排他オープンを試みることで確保する。
+                    auto renamedFile = claimRenamedFile(outDir, QFileInfo(outPath).fileName());
+                    if (!renamedFile) {
+                        summary.failures.push_back({job.inputPdfPath, pageNumber,
+                            QCoreApplication::translate("Converter",
+                                "別名保存先の候補を確保できませんでした: %1").arg(outPath)});
+                        ++summary.failedPages;
+                        ++doneInFile;
+                        emit pageDone(doneInFile, plannedInFile);
+                        continue;
+                    }
+                    outPath = renamedFile->fileName();
+                    saved = writeImageExclusive(*renamedFile, image);
                 }
-                if (job.overwritePolicy == OverwritePolicy::Rename) {
-                    outPath = renamedPath(outDir, QFileInfo(outPath).fileName());
-                }
-                // Overwrite はそのまま保存
             }
-            if (!image.save(outPath, "PNG")) {
+            if (!saved) {
                 // 書き込み失敗はこのページ・このファイルだけの問題として扱う。
                 // 出力先ディレクトリ自体の存在・書き込み可否は、このループへ入る前に
                 // 既に検査済み（上の outDir チェック）。ここでの失敗を無条件に

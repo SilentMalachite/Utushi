@@ -1,10 +1,26 @@
 #pragma once
 #include "core/conversion_job.hpp"
 
+#include <QFile>
+#include <QImage>
 #include <QObject>
 #include <atomic>
 
 namespace utsushi {
+
+// file（呼び出し前に書き込み用に開かれていること）へ image を PNG として書き込む。
+// 失敗した場合、file を閉じて削除する。
+//
+// 呼び出し規約: file は必ず QIODevice::NewOnly で「呼び出し側がこの呼び出しの直前に
+// 新規作成した」ものであること。この関数はその前提の上で削除するため、他プロセスや
+// 以前から存在した既存ファイルを誤って削除することはない。
+//
+// Skip/Rename の保存先確保を「存在確認してから書く」のではなく「排他的に確保してから
+// 書く」方式に変えるための部品（2026-08-02 レビュー Blocker 修正）。匿名名前空間に
+// 閉じず公開しているのは、Converter::run() の通常経路では image.isNull() が
+// この手前で既に弾かれるため、null 画像による保存失敗という経路そのものへ
+// 到達できず、この関数を直接呼ばない限り失敗時のクリーンアップを検証できないため。
+[[nodiscard]] bool writeImageExclusive(QFile& file, const QImage& image);
 
 // ワーカースレッドへ moveToThread して使う（QThread は継承しない）。
 // QPdfDocument は run() の中でのみ生成・使用する = ワーカースレッド局所。

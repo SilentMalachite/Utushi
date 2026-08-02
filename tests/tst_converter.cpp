@@ -594,6 +594,70 @@ private slots:
         QVERIFY(QFileInfo::exists(dir.path() + u"/good_p001.png"_s));
     }
 
+    // Blocker fix (2026-08-02 review): Skip/Rename の保存先確保を「存在確認してから
+    // 書く」方式から「排他的に確保してから書く」方式へ変える際、確保直後の書き込みが
+    // 失敗したら、確保のために作られた 0 バイトのファイルを残さないこと。
+    // この失敗経路は Converter::run() の通常経路からは到達できない
+    // （image.isNull() がこの手前で既に弾くため、null 画像で run() を通してこの分岐へ
+    // 入ることができない）。そのため保存とクリーンアップを担う writeImageExclusive() を
+    // 直接呼び、意図的に null な QImage を渡して保存失敗を確定的に起こす。
+    // これはタイミング競合のテストではない。何度実行しても同じ結果になる。
+    void exclusiveWriteRemovesStrayFileOnSaveFailure() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.path() + u"/stray.png"_s;
+
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::NewOnly));
+        QVERIFY2(QFileInfo::exists(path), "NewOnly のオープン自体が 0 バイトのファイルを作るはず");
+
+        const QImage nullImage;   // isNull() == true。image.save() は必ず false を返す
+        QVERIFY(nullImage.isNull());
+
+        QVERIFY(!utsushi::writeImageExclusive(file, nullImage));
+        QVERIFY2(!QFileInfo::exists(path),
+                 "保存失敗時、確保のために作られた 0 バイトのファイルを残してはいけない");
+    }
+
+    // Blocker fix (2026-08-02 review): Rename の候補選定が「確認してから書く」方式でも
+    // 複数の候補が既に埋まっている場合に正しく次の空き番号へ進むこと。これは競合を
+    // 起こさない決定的なテストで、確保方式を「排他オープンで確保」へ変えたあとも
+    // この観測可能な契約が壊れていないことを固定する。
+    void renameSkipsTakenCandidatesToFindNextFree() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString pdf = writeSamplePdf(dir.path(), u"doc.pdf"_s, 1);
+
+        const auto writeSentinel = [](const QString& path, const QByteArray& content) {
+            QFile f(path);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(content);
+        };
+        const QString base = dir.path() + u"/doc_p001.png"_s;
+        const QString taken2 = dir.path() + u"/doc_p001_2.png"_s;
+        writeSentinel(base, "sentinel-base");
+        writeSentinel(taken2, "sentinel-2");
+
+        ConversionJob job;
+        job.inputPdfPath = pdf;
+        job.outputDirPath = dir.path();
+        job.dpi = 150.0;
+        job.overwritePolicy = OverwritePolicy::Rename;
+
+        Converter converter;
+        QSignalSpy finishedSpy(&converter, &Converter::finished);
+        converter.run({job});
+
+        QCOMPARE(lastSummary(finishedSpy).succeededPages, 1);
+        QVERIFY(QFileInfo::exists(dir.path() + u"/doc_p001_3.png"_s));
+        QFile checkBase(base);
+        QVERIFY(checkBase.open(QIODevice::ReadOnly));
+        QCOMPARE(checkBase.readAll(), QByteArray("sentinel-base"));
+        QFile check2(taken2);
+        QVERIFY(check2.open(QIODevice::ReadOnly));
+        QCOMPARE(check2.readAll(), QByteArray("sentinel-2"));
+    }
+
     // DPI 過大: renderSizeFor が nullopt を返し、ページ失敗として記録される
     void oversizedDpiFailsPage() {
         QTemporaryDir dir;
