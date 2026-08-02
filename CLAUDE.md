@@ -74,6 +74,7 @@ utsushi/
 │   ├── tst_output_path.cpp
 │   ├── tst_converter.cpp        # 検証用 PDF は QPdfWriter で実行時に合成する（バイナリを
 │   │                              git に置かず、Qt バージョン間の差異でも壊れないため）
+│   ├── tst_main_window.cpp      # app/ を組み込む唯一のテスト。Qt6::Widgets をリンクする
 │   └── tst_no_hardcode.cpp      # 規約スキャナ（不変条件テスト）
 └── packaging/
     ├── macos/

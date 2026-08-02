@@ -86,15 +86,30 @@ void Converter::run(const std::vector<ConversionJob>& jobs) {
         emit fileStarted(fileIndex, fileCount, job.inputPdfPath);
 
         const QString stem = QFileInfo(job.inputPdfPath).completeBaseName();
+        // 衝突判定は実際に書き出されるファイル名の元になる値で行う。outputFileName()
+        // は内部で sanitizedStem() を通すため、生の completeBaseName() だけを比較すると
+        // 別々の生 stem が同じ正規化結果へ丸められるケースを見逃す
+        // （例: "a:b" と "a?b" はどちらも "a_b" に正規化され、同じ
+        // "a_b_p001.png" を生成する。Fix wave 2, re-review finding）。
+        // macOS (APFS 既定) と Windows (NTFS 既定) はいずれもファイルシステムが既定で
+        // 大文字小文字を区別しないため、比較キーも toCaseFolded() で畳み込む
+        // （"Report.pdf" と "report.pdf" は同じファイルに書き込まれる）。
         const QString outputKey =
-            QDir(job.outputDirPath).absolutePath() + QChar(u'\x1f') + stem;
+            (QDir(job.outputDirPath).absolutePath() + QChar(u'\x1f') + sanitizedStem(stem))
+                .toCaseFolded();
         const auto claimedIt = claimedOutputs.constFind(outputKey);
         if (claimedIt != claimedOutputs.constEnd()) {
-            summary.failures.push_back({job.inputPdfPath, 0,
-                QCoreApplication::translate("Converter",
-                    "出力ファイル名が %1 と重複するため変換していません"
-                    "（同じ出力先に同じファイル名で書き込まれます）")
-                    .arg(claimedIt.value())});
+            // 同じファイルが一覧に重複して追加されているだけの場合は、「自分自身と
+            // 重複」という不自然な文言にしない（実害はなく最初の 1 回だけ変換される）。
+            const QString reason = (claimedIt.value() == job.inputPdfPath)
+                ? QCoreApplication::translate("Converter",
+                      "同じファイルが変換対象に複数回追加されています"
+                      "（最初の 1 回だけ変換します）")
+                : QCoreApplication::translate("Converter",
+                      "出力ファイル名が %1 と重複するため変換していません"
+                      "（同じ出力先に同じファイル名で書き込まれます）")
+                      .arg(claimedIt.value());
+            summary.failures.push_back({job.inputPdfPath, 0, reason});
             ++summary.failedPages;
             continue;   // 1 件の衝突でバッチを止めない。このファイルだけ変換しない
         }

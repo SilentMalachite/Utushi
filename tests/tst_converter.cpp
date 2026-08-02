@@ -414,6 +414,106 @@ private slots:
         QVERIFY(!QFileInfo::exists(outDir.path() + u"/report_p003.png"_s));   // jobB は処理されていない
     }
 
+    // Fix wave 2, re-review: 衝突判定は sanitizedStem() 後の値で行うこと。
+    // "a:b.pdf" と "a?b.pdf" は生の completeBaseName() では別物 ("a:b" != "a?b") だが、
+    // どちらも sanitizedStem() で "a_b" に正規化され、outputFileName() は同じ
+    // "a_b_p001.png" を生成する。生の stem だけを比較すると、この衝突をすり抜ける。
+    void sanitizedStemCollisionIsReportedAsConflict() {
+        QTemporaryDir dirA;
+        QTemporaryDir dirB;
+        QTemporaryDir outDir;
+        QVERIFY(dirA.isValid());
+        QVERIFY(dirB.isValid());
+        QVERIFY(outDir.isValid());
+        const QString pdfA = writeSamplePdf(dirA.path(), u"a:b.pdf"_s, 1);
+        const QString pdfB = writeSamplePdf(dirB.path(), u"a?b.pdf"_s, 1);
+        QVERIFY2(QFileInfo::exists(pdfA), qPrintable(pdfA));
+        QVERIFY2(QFileInfo::exists(pdfB), qPrintable(pdfB));
+
+        ConversionJob jobA;
+        jobA.inputPdfPath = pdfA;
+        jobA.outputDirPath = outDir.path();
+        jobA.dpi = 150.0;
+        ConversionJob jobB;
+        jobB.inputPdfPath = pdfB;
+        jobB.outputDirPath = outDir.path();
+        jobB.dpi = 150.0;
+
+        Converter converter;
+        QSignalSpy finishedSpy(&converter, &Converter::finished);
+        converter.run({jobA, jobB});
+
+        const auto summary = lastSummary(finishedSpy);
+        QCOMPARE(summary.succeededPages, 1);
+        QCOMPARE(summary.skippedPages, 0);   // "スキップ" ではなく明示的な失敗として扱う
+        QCOMPARE(summary.failedPages, 1);
+        QCOMPARE(summary.failures.size(), std::size_t{1});
+        QCOMPARE(summary.failures.front().filePath, pdfB);
+        QVERIFY(QFileInfo::exists(outDir.path() + u"/a_b_p001.png"_s));
+    }
+
+    // Fix wave 2, re-review: macOS (APFS 既定) と Windows (NTFS 既定) はどちらも
+    // 大文字小文字を区別しないファイルシステムが既定なので、"Report.pdf" と
+    // "report.pdf" は同じファイルに書き込まれる。比較キーは大文字小文字を区別しない
+    // こと（大文字小文字だけが異なる生の stem は別々のキーとして素通りしてはいけない）。
+    void caseOnlyStemCollisionIsReportedAsConflict() {
+        QTemporaryDir dirA;
+        QTemporaryDir dirB;
+        QTemporaryDir outDir;
+        QVERIFY(dirA.isValid());
+        QVERIFY(dirB.isValid());
+        QVERIFY(outDir.isValid());
+        const QString pdfA = writeSamplePdf(dirA.path(), u"Report.pdf"_s, 1);
+        const QString pdfB = writeSamplePdf(dirB.path(), u"report.pdf"_s, 1);
+
+        ConversionJob jobA;
+        jobA.inputPdfPath = pdfA;
+        jobA.outputDirPath = outDir.path();
+        jobA.dpi = 150.0;
+        ConversionJob jobB;
+        jobB.inputPdfPath = pdfB;
+        jobB.outputDirPath = outDir.path();
+        jobB.dpi = 150.0;
+
+        Converter converter;
+        QSignalSpy finishedSpy(&converter, &Converter::finished);
+        converter.run({jobA, jobB});
+
+        const auto summary = lastSummary(finishedSpy);
+        QCOMPARE(summary.succeededPages, 1);
+        QCOMPARE(summary.skippedPages, 0);   // "スキップ" ではなく明示的な失敗として扱う
+        QCOMPARE(summary.failedPages, 1);
+        QCOMPARE(summary.failures.size(), std::size_t{1});
+        QCOMPARE(summary.failures.front().filePath, pdfB);
+    }
+
+    // Fix wave 2, re-review: 同じファイルが一覧に重複して追加された場合、失敗理由が
+    // 「自分自身と重複」という不自然な文言にならないこと。
+    void duplicateEntryOfSameFileUsesSelfDuplicateWording() {
+        QTemporaryDir dir;
+        QTemporaryDir outDir;
+        QVERIFY(dir.isValid());
+        QVERIFY(outDir.isValid());
+        const QString pdf = writeSamplePdf(dir.path(), u"doc.pdf"_s, 1);
+
+        ConversionJob jobA;
+        jobA.inputPdfPath = pdf;
+        jobA.outputDirPath = outDir.path();
+        jobA.dpi = 150.0;
+        ConversionJob jobB = jobA;   // 同じファイルを 2 回追加
+
+        Converter converter;
+        QSignalSpy finishedSpy(&converter, &Converter::finished);
+        converter.run({jobA, jobB});
+
+        const auto summary = lastSummary(finishedSpy);
+        QCOMPARE(summary.succeededPages, 1);
+        QCOMPARE(summary.failedPages, 1);
+        QCOMPARE(summary.failures.size(), std::size_t{1});
+        QVERIFY2(!summary.failures.front().reason.contains(pdf),
+                 qPrintable(summary.failures.front().reason));
+    }
+
     // Fix wave 2, finding 3: ページ失敗を挟んでも pageDone の最終値は plannedInFile に
     // 到達すること。2 ページの PDF に対して {1, 2, 99} を指定すると 99 は範囲外で
     // 失敗するが、それも「試みた」うちに数えられ、プログレスバーが 3/3 で終わる
