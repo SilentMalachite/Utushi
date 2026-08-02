@@ -145,6 +145,12 @@ void Converter::run(const std::vector<ConversionJob>& jobs) {
                 summary.failures.push_back({job.inputPdfPath, pageNumber,
                     QCoreApplication::translate("Converter", "ページ番号が範囲外です")});
                 ++summary.failedPages;
+                // 失敗したページも「試みた」うちに数える。ここで doneInFile を進めないと
+                // 最後のページが失敗で終わったとき progress が plannedInFile に到達せず、
+                // プログレスバーが 100% にならないまま「完了」表示だけが出る矛盾が起きる
+                // （Fix wave 2, finding 3）。
+                ++doneInFile;
+                emit pageDone(doneInFile, plannedInFile);
                 continue;
             }
             const auto size = renderSizeFor(doc->pagePointSize(pageIndex), job.dpi);
@@ -152,6 +158,8 @@ void Converter::run(const std::vector<ConversionJob>& jobs) {
                 summary.failures.push_back({job.inputPdfPath, pageNumber,
                     QCoreApplication::translate("Converter", "DPI が大きすぎます")});
                 ++summary.failedPages;
+                ++doneInFile;
+                emit pageDone(doneInFile, plannedInFile);
                 continue;
             }
             const QImage image = doc->render(pageIndex, *size);
@@ -159,6 +167,8 @@ void Converter::run(const std::vector<ConversionJob>& jobs) {
                 summary.failures.push_back({job.inputPdfPath, pageNumber,
                     QCoreApplication::translate("Converter", "ページのレンダリングに失敗しました")});
                 ++summary.failedPages;
+                ++doneInFile;
+                emit pageDone(doneInFile, plannedInFile);
                 continue;
             }
 

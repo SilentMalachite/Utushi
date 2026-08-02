@@ -414,6 +414,36 @@ private slots:
         QVERIFY(!QFileInfo::exists(outDir.path() + u"/report_p003.png"_s));   // jobB は処理されていない
     }
 
+    // Fix wave 2, finding 3: ページ失敗を挟んでも pageDone の最終値は plannedInFile に
+    // 到達すること。2 ページの PDF に対して {1, 2, 99} を指定すると 99 は範囲外で
+    // 失敗するが、それも「試みた」うちに数えられ、プログレスバーが 3/3 で終わる
+    // （2/3 で止まったまま UI 側だけ「完了」と表示される矛盾を防ぐ）。
+    void progressReachesTotalEvenWhenAPageFails() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString pdf = writeSamplePdf(dir.path(), u"doc.pdf"_s, 2);
+
+        ConversionJob job;
+        job.inputPdfPath = pdf;
+        job.outputDirPath = dir.path();
+        job.pages = {1, 2, 99};   // 99 はこの 2 ページ PDF では範囲外
+        job.dpi = 150.0;
+
+        Converter converter;
+        QSignalSpy finishedSpy(&converter, &Converter::finished);
+        QSignalSpy pageSpy(&converter, &Converter::pageDone);
+        converter.run({job});
+
+        QCOMPARE(pageSpy.count(), 3);
+        const auto lastArgs = pageSpy.last();
+        QCOMPARE(lastArgs.at(0).toInt(), 3);   // done
+        QCOMPARE(lastArgs.at(1).toInt(), 3);   // plannedInFile
+
+        const auto summary = lastSummary(finishedSpy);
+        QCOMPARE(summary.succeededPages, 2);
+        QCOMPARE(summary.failedPages, 1);
+    }
+
     // DPI 過大: renderSizeFor が nullopt を返し、ページ失敗として記録される
     void oversizedDpiFailsPage() {
         QTemporaryDir dir;
