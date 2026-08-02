@@ -13,9 +13,12 @@
 #include <memory>
 
 namespace utsushi {
-namespace {
 
-// エラー種別ごとの表示文言。core は Widgets を使わないが tr() は QObject のもので可。
+// エラー種別ごとの表示文言。core は Widgets を使わないが QCoreApplication::translate は
+// QObject 由来の翻訳機構なので core から使ってよい（tr() は使わない）。
+// app/main_window.cpp の buildJobs() 事前検査からも再利用するため、匿名名前空間に
+// 閉じず外部リンケージにして converter.hpp で宣言している
+// （2026-08-02 レビュー Blocker 修正: 事前検査と worker とで表示が食い違わないように）。
 QString loadErrorText(QPdfDocument::Error error) {
     switch (error) {
     case QPdfDocument::Error::IncorrectPassword:
@@ -29,6 +32,8 @@ QString loadErrorText(QPdfDocument::Error error) {
         return QCoreApplication::translate("Converter", "PDF として読み込めません");
     }
 }
+
+namespace {
 
 // Rename ポリシー: report_p001.png → report_p001_2.png, _3, ... の空き番号を確保する。
 // 「exists() で候補を選んでから書く」のではなく、各候補を QIODevice::NewOnly で

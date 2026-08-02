@@ -235,7 +235,11 @@ std::vector<ConversionJob> MainWindow::buildJobs(std::vector<PageFailure>& failu
             error = probe->load(path);
         }
         if (error != QPdfDocument::Error::None) {
-            failures.push_back({path, 0, tr("PDF として読み込めません")});
+            // core::loadErrorText() を再利用する。事前検査（ここ）とワーカー
+            // （Converter::run()）が別々のエラー文言ロジックを持つと、同じ失敗原因
+            // （例: パスワード誤り）でも通った経路によって表示が食い違う
+            // （2026-08-02 レビュー Blocker 修正）。
+            failures.push_back({path, 0, loadErrorText(error)});
             continue;
         }
         const auto pages = parsePageRange(m_pageRangeEdit->text(), probe->pageCount());

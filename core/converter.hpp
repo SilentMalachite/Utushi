@@ -4,9 +4,19 @@
 #include <QFile>
 #include <QImage>
 #include <QObject>
+#include <QPdfDocument>
 #include <atomic>
 
 namespace utsushi {
+
+// QPdfDocument::Error を利用者向けの文言へ変換する。UI の事前検査（MainWindow::buildJobs）
+// とワーカー（Converter::run）の両方が同じ変換ロジックを再利用することで、
+// 同じ失敗原因（例: パスワード誤り）に対して片方だけ具体的な理由を示し、
+// もう片方は一律の汎用文言に潰す、という不整合を防ぐ
+// （2026-08-02 レビュー Blocker 修正）。
+// core は QtWidgets を使わないが、QObject 由来の翻訳機構である
+// QCoreApplication::translate は core からも使ってよい（tr() は使わない）。
+[[nodiscard]] QString loadErrorText(QPdfDocument::Error error);
 
 // file（呼び出し前に書き込み用に開かれていること）へ image を PNG として書き込む。
 // 失敗した場合、file を閉じて削除する。

@@ -192,6 +192,39 @@ private slots:
         QVERIFY(QFileInfo::exists(dir.path() + u"/doc_p001_2.png"_s));
     }
 
+    // Blocker fix (2026-08-02 review): buildJobs() の事前検査で弾かれた PDF は、
+    // すべて一律の「PDF として読み込めません」に潰されていた。これでは
+    // 「ファイルが存在しない」と「パスワードが違う」をユーザーが区別できない。
+    // 存在しないファイルを渡し、core::loadErrorText() が返す具体的な理由
+    // （「ファイルが見つかりません」）が summary に出ること、かつ一律の汎用文言
+    // （「PDF として読み込めません」）が出ないことを検証する。
+    void preflightFailureNamesSpecificReasonForMissingFile() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString missingPdf = dir.path() + u"/missing.pdf"_s;   // 存在しない
+
+        MainWindow window;
+        auto* fileList = window.findChild<QListWidget*>(u"fileList"_s);
+        auto* outputDirEdit = window.findChild<QLineEdit*>(u"outputDirEdit"_s);
+        auto* convertButton = window.findChild<QPushButton*>(u"convertButton"_s);
+        auto* summaryView = window.findChild<QPlainTextEdit*>(u"summaryView"_s);
+        QVERIFY(fileList);
+        QVERIFY(outputDirEdit);
+        QVERIFY(convertButton);
+        QVERIFY(summaryView);
+
+        fileList->addItem(missingPdf);
+        outputDirEdit->setText(dir.path());
+
+        // buildJobs() が全件弾く → jobs.empty() の早期リターンは同期的に
+        // showSummary() を呼ぶので、ワーカースレッドの完了を待つ必要はない。
+        convertButton->click();
+
+        const QString text = summaryView->toPlainText();
+        QVERIFY2(text.contains(u"ファイルが見つかりません"_s), qPrintable(text));
+        QVERIFY2(!text.contains(u"PDF として読み込めません"_s), qPrintable(text));
+    }
+
     // Fix wave 2, finding 4: buildJobs() が全ファイルを事前検査で弾くと jobs が空になり、
     // startConversion() は cancelled も aborted も立たない default 構築の summary で
     // showSummary() を呼ぶ（jobs.empty() の早期リターン）。このとき一目で読む状態表示が
