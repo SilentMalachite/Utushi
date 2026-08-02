@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <QDir>
 #include <QFile>
 #include <QImage>
 #include <QPainter>
@@ -552,6 +553,45 @@ private slots:
         const auto summary = lastSummary(finishedSpy);
         QCOMPARE(summary.succeededPages, 2);
         QCOMPARE(summary.failedPages, 1);
+    }
+
+    // Blocker fix (2026-08-02 review): 1 ファイルの PNG 保存失敗はページ単位の失敗として
+    // 記録し、後続の正常なファイルの変換を止めないこと。出力先ディレクトリ自体の
+    // 存在・書き込み可否は別の検査（abortedOutputDirectoryCountsAsFailedPage）で
+    // 既にカバーされているため、ここでは「ディレクトリは正常だが特定の出力パスへの
+    // 保存だけが失敗する」状況を作る。出力予定のパスにあらかじめディレクトリを
+    // 作っておくと、image.save() はそこへファイルとして書き込めず確実に失敗する
+    // （クロスプラットフォームで再現可能。パーミッション操作より確実）。
+    void saveFailureDoesNotAbortFollowingFile() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString blockedPdf = writeSamplePdf(dir.path(), u"blocked.pdf"_s, 1);
+        const QString goodPdf = writeSamplePdf(dir.path(), u"good.pdf"_s, 1);
+        // 保存先を先にディレクトリとして占有しておく。Overwrite を指定しない限り
+        // Skip/Rename の exists() 分岐で吸収されてしまい、保存失敗そのものに
+        // 到達できないため、ここでは Overwrite で直接 image.save() 失敗の経路を通す。
+        QVERIFY(QDir(dir.path()).mkdir(u"blocked_p001.png"_s));
+
+        ConversionJob blockedJob;
+        blockedJob.inputPdfPath = blockedPdf;
+        blockedJob.outputDirPath = dir.path();
+        blockedJob.overwritePolicy = OverwritePolicy::Overwrite;
+        ConversionJob goodJob;
+        goodJob.inputPdfPath = goodPdf;
+        goodJob.outputDirPath = dir.path();
+
+        Converter converter;
+        QSignalSpy finishedSpy(&converter, &Converter::finished);
+        converter.run({blockedJob, goodJob});
+
+        const auto summary = lastSummary(finishedSpy);
+        QVERIFY(!summary.aborted);
+        QCOMPARE(summary.failedPages, 1);
+        QCOMPARE(summary.succeededPages, 1);
+        QVERIFY(!summary.failures.empty());
+        QVERIFY2(!summary.failures.front().reason.isEmpty(),
+                 qPrintable(summary.failures.front().reason));
+        QVERIFY(QFileInfo::exists(dir.path() + u"/good_p001.png"_s));
     }
 
     // DPI 過大: renderSizeFor が nullopt を返し、ページ失敗として記録される

@@ -201,14 +201,20 @@ void Converter::run(const std::vector<ConversionJob>& jobs) {
                 // Overwrite はそのまま保存
             }
             if (!image.save(outPath, "PNG")) {
-                // 書き込み失敗 = 出力先の異常。バッチ全体を中止する
-                summary.aborted = true;
+                // 書き込み失敗はこのページ・このファイルだけの問題として扱う。
+                // 出力先ディレクトリ自体の存在・書き込み可否は、このループへ入る前に
+                // 既に検査済み（上の outDir チェック）。ここでの失敗を無条件に
+                // バッチ全体の中止へ格上げすると、同じバッチ内の後続の正常な
+                // ファイルまで変換されなくなり、「1 件の失敗で全体を止めない」
+                // 契約（AGENTS.md #6 / CLAUDE.md）に反する
+                // （2026-08-02 レビュー Blocker 修正）。
                 summary.failures.push_back({job.inputPdfPath, pageNumber,
                     QCoreApplication::translate("Converter", "PNG の保存に失敗しました: %1")
                         .arg(outPath)});
                 ++summary.failedPages;
-                emit finished(summary);
-                return;
+                ++doneInFile;
+                emit pageDone(doneInFile, plannedInFile);
+                continue;
             }
             ++summary.succeededPages;
             ++doneInFile;
