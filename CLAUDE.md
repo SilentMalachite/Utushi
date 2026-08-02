@@ -197,7 +197,7 @@ namespace utsushi {
 - [ ] 壊れた PDF を含む 3 ファイルのバッチで、正常 2 件が変換され、失敗 1 件がサマリに理由付きで表示される
 - [ ] 既存の出力ファイルが `Skip` 設定で上書きされない
 - [ ] `tst_no_hardcode` が緑
-- [ ] `macdeployqt` / `windeployqt` を通した配布物が、Qt 未インストールのクリーンな環境で起動する
+- [x] `macdeployqt` / `windeployqt` を通した配布物が、Qt 未インストールのクリーンな環境で起動する（CI の "Verify no external Qt/Homebrew references" [macOS] / "Verify no missing DLL dependencies" [Windows] による静的検証と、"Verify launch with Qt removed from the environment" による両OSでの実起動検証で継続的に確認する。`.github/workflows/ci.yml` 参照）
 - [ ] Qt を動的リンクしており、`ヘルプ > ライセンス` から LGPLv3 の告知と Qt のソース入手先を表示できる
 
 ---
