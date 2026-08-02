@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14          # arm64
+            qt_arch: clang_64
+          - os: windows-2022      # x64
+            qt_arch: win64_msvc2022_64
+    runs-on: ${{ matrix.os }}
+    env:
+      # tst_converter が QGuiApplication を要求するため、ヘッドレスランナーでは
+      # オフスクリーンプラットフォームプラグインを使う。
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt (with qtpdf module)
+        uses: jurplel/install-qt-action@v4
+        with:
+          # 開発機・CI は Qt 6.11.x を使う。find_package(Qt6 6.8 REQUIRED ...) は下限指定なので
+          # コード側は無変更で通る。バージョンはここだけ実態（開発機 6.11.1）に合わせる。
+          version: '6.11.*'
+          arch: ${{ matrix.qt_arch }}
+          modules: 'qtpdf' # 明示しないと find_package(Qt6 COMPONENTS Pdf) が失敗する
+
+      - name: Configure (macOS)
+        if: runner.os == 'macOS'
+        # デフォルトの単一設定ジェネレータ（Unix Makefiles）を使う。成果物は
+        # build/app/ 直下に出るため、後続ステップの macdeployqt / 検証パスと一致する。
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DUTSUSHI_WERROR=ON
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        # Visual Studio ジェネレータ（マルチコンフィグ）を明示指定する。成果物は
+        # build/app/Release/ に出る前提をここで固定し、デフォルト検出に頼らない。
+        run: cmake -B build -S . -G "Visual Studio 17 2022" -A x64 -DUTSUSHI_WERROR=ON
+
+      - name: Build
+        run: cmake --build build --parallel --config Release
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Verify build output exists (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -eu
+          if [ ! -x build/app/utsushi.app/Contents/MacOS/utsushi ]; then
+            echo "::error::utsushi.app の実行ファイルが見つかりません (build/app/utsushi.app/Contents/MacOS/utsushi)。"
+            exit 1
+          fi
+
+      - name: Verify build output exists (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -eu
+          if [ ! -f build/app/Release/utsushi.exe ]; then
+            echo "::error::utsushi.exe が見つかりません (build/app/Release/utsushi.exe)。マルチコンフィグジェネレータの出力パスを確認してください。"
+            exit 1
+          fi
+
+      - name: Deploy (macOS)
+        if: runner.os == 'macOS'
+        run: macdeployqt build/app/utsushi.app -verbose=1
+
+      - name: Deploy (Windows)
+        if: runner.os == 'Windows'
+        run: windeployqt build/app/Release/utsushi.exe
+        shell: cmd
+
+      - name: Verify LICENSE is bundled (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -eu
+          if [ ! -f build/app/utsushi.app/Contents/Resources/LICENSE ]; then
+            echo "::error::LICENSE が utsushi.app/Contents/Resources に同梱されていません。"
+            exit 1
+          fi
+
+      - name: Verify LICENSE is bundled (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -eu
+          if [ ! -f build/app/Release/LICENSE ]; then
+            echo "::error::LICENSE が utsushi.exe と同じディレクトリに同梱されていません。"
+            exit 1
+          fi
+
+      - name: Upload artifact (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: utsushi-macos-arm64
+          path: build/app/utsushi.app
+
+      - name: Upload artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: utsushi-windows-x64
+          path: build/app/Release/
