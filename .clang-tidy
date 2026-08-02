@@ -1,0 +1,75 @@
+# .clang-tidy — Utsushi 静的解析設定
+#
+# 実行方法は AGENTS.md「仕様（レビュー時の検証手順）」#3 を参照。レビュアーのローカル環境
+# でのみ実行する検証ゲートであり、CI（.github/workflows/ci.yml）には組み込んでいない
+# （clang-tidy は MSVC で一度も検証していないため。理由は AGENTS.md 側に記載）。
+#
+# --- 有効化の方針 ---
+# AGENTS.md「レビューしない」節（命名の好み・括弧の位置・コメントの量・「もっと汎用的に
+# できる」系の提案）に出るような指摘をしないことを最優先にする。指摘のほぼ全てがスタイル・
+# 慣習の話になりがちな readability-* / cppcoreguidelines-* / google-* / llvm-* / hicpp-* は
+# 有効化しない。実害のあるバグを機械的に検出できるファミリーだけを選ぶ:
+#
+#   clang-analyzer-*   パス感度のある静的解析（null 参照外し、未初期化読み取り、メモリ関連
+#                       の実バグ）。app/ の Qt 親子所有権パターン（下記参照）を誤検出しない
+#                       ことを実測済み（new-delete-leak 系チェックは 0 件）。
+#   bugprone-*          既知のバグパターン全般。core/output_path.cpp の narrowing
+#                       conversion（qsizetype -> int の暗黙変換）はこのファミリーが実際に
+#                       検出した実例。
+#   performance-*       実行時パフォーマンスに影響する既知のアンチパターン。
+#   modernize-use-nullptr / use-using / use-override / loop-convert / use-emplace
+#                       docs/qt-conventions.md が明文で禁止している C++11 期の書き方
+#                       （NULL/0、typedef、生の for ループによるコンテナ走査、override 忘れ）
+#                       そのものを機械的に検証する。これは好みの指摘ではなく、このプロジェク
+#                       トが既に文書化して合意済みのルールの検証なので、modernize-* の他の
+#                       サブチェック（-* で無効化済み）とは扱いを分けている。
+#
+# --- 個別に無効化しているチェック ---
+#
+#   -bugprone-easily-swappable-parameters
+#       隣接する同じ型の引数を機械的に「入れ替わるかもしれない」と警告するだけで、実際の
+#       誤用の証拠を伴わない。このコードベースでは outputFileName(pageNumber, totalPages)
+#       の 1 件のみを拾うが、その境界値はデータ駆動テスト（tests/tst_output_path.cpp）で
+#       網羅済み。AGENTS.md「レビューしない」節の「もっと汎用的にできる」系と同種の、確証の
+#       ない先回り指摘に分類されるため無効化する。
+#
+#   -performance-enum-size
+#       core/conversion_job.hpp の OverwritePolicy を std::uint8_t 基底にすると 3 バイト
+#       節約できる、という指摘。バッチ処理中に数える程度しかコピーされない値オブジェクトに
+#       対する投機的マイクロ最適化であり、AGENTS.md が明示的に指摘対象外とする種類の提案
+#       そのもの。無効化する（見落としではなく意図的な判断）。
+#
+#   -cppcoreguidelines-owning-memory
+#       cppcoreguidelines-* ファミリー自体は上記の方針により有効化していないため、この行は
+#       現状 no-op（元々発火しない）。実測で確認済み: このチェックだけを
+#       cppcoreguidelines-* 経由で有効化すると、docs/qt-conventions.md が明文で許可して
+#       いる「親を持つ QObject は生 new でよい」という Qt の慣用パターン（例:
+#       app/main_window.cpp の `new QPushButton(tr(...), central)`）に対して 25 件超の
+#       gsl::owner<> 誤検出を出す。将来 cppcoreguidelines-* を追加したくなったときに、
+#       「なぜ owning-memory だけ外すのか」を思い出させるための明示的な記録として残す。
+Checks: >
+  -*,
+  clang-analyzer-*,
+  bugprone-*,
+  performance-*,
+  modernize-use-nullptr,
+  modernize-use-using,
+  modernize-use-override,
+  modernize-loop-convert,
+  modernize-use-emplace,
+  -bugprone-easily-swappable-parameters,
+  -performance-enum-size,
+  -cppcoreguidelines-owning-memory
+
+# 対象は core/ と app/（AGENTS.md の不変条件レビュー対象と一致）。tests/ は Qt Test の
+# マクロ的パターンでこのチェックセットと相性が悪いノイズが出やすく、かつ AGENTS.md の
+# 不変条件チェックリストの対象外なのでヘッダ診断の対象に含めない。
+HeaderFilterRegex: '(core|app)/.*\.hpp$'
+
+# 意図的に空のまま。特定のチェックを「ビルドを壊すエラー」に昇格させない。
+# 理由: 上流の Qt ヘッダの些細な変更（新しい Qt バージョンで新規に警告が増える等）だけで
+# 無関係なレビューがブロックされる事故を避けるため。加えて、このゲートは AGENTS.md の方針
+# により CI ではなくレビュアーのローカル実行に限定しており、ビルドの成否そのものを左右する
+# 仕組みにする必要がない。診断が 0 件かどうか（`clang-diagnostic-error` の有無も含めて）は
+# AGENTS.md 側の検証手順でレビュアーが目視確認する。
+WarningsAsErrors: ''
