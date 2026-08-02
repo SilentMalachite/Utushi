@@ -133,6 +133,127 @@ jobs:
             exit 1
           fi
 
+      - name: Verify no external Qt/Homebrew references (macOS)
+        if: runner.os == 'macOS'
+        # 受け入れ基準「配布物が Qt 未インストールのクリーンな環境で起動する」の静的側面。
+        # bundle 内のすべての Mach-O バイナリ（実行ファイル・フレームワーク本体・プラグイン）
+        # を otool -L で走査し、依存先が @rpath/@executable_path/@loader_path 経由か、
+        # OS 提供の /usr/lib・/System 配下でなければ失敗させる。ホワイトリスト方式なので、
+        # Qt SDK のインストール先が CI と開発機で異なっていても（ハードコードした特定パスに
+        # 依存せずに）漏れを検出できる。あわせてメイン実行ファイルの LC_RPATH が
+        # @executable_path/../Frameworks のみであることも確認する。
+        shell: bash
+        run: |
+          set -eu
+          set -o pipefail
+
+          bundle="$DEPLOY_TARGET"
+          status=0
+          tab="$(printf '\t')"
+
+          echo "Scanning Mach-O binaries under: $bundle"
+
+          while IFS= read -r -d '' bin; do
+            if ! file "$bin" | grep -q "Mach-O"; then
+              continue
+            fi
+
+            # otool -L はアーキテクチャごとに「<path> (architecture X):」ヘッダーと依存
+            # ブロックを繰り返す（universal binary 対応）。ヘッダー行は先頭タブを持たず、
+            # 依存エントリ（共有ライブラリ自身の LC_ID_DYLIB 行を含む）は必ず先頭タブを
+            # 持つ。この構造上の違いでヘッダーを機械的に除外する（行数を決め打ちで
+            # スキップする方式は universal binary で誤検出する）。
+            #
+            # 共有ライブラリの LC_ID_DYLIB 行を依存とは別扱いで読み飛ばしてはいない。
+            # macdeployqt 適用後は自身の id も @rpath/... に書き換わっており、下記の
+            # ホワイトリストをそのまま満たすため、依存と同列に扱っても安全。
+            while IFS= read -r depline; do
+              path=$(echo "$depline" | sed -E 's/^[[:space:]]*([^[:space:]]+).*/\1/')
+              [ -z "$path" ] && continue
+              case "$path" in
+                @rpath/*|@executable_path/*|@loader_path/*|/usr/lib/*|/System/*) ;;
+                *)
+                  echo "::error::${bin} が bundle 外部を参照しています: ${path}"
+                  status=1
+                  ;;
+              esac
+            done < <(otool -L "$bin" | awk -v tab="$tab" 'index($0, tab) == 1')
+          done < <(find "$bundle" -type f \( -perm -u+x -o -iname "*.dylib" \) -print0)
+
+          exe="$bundle/Contents/MacOS/utsushi"
+          if [ ! -f "$exe" ]; then
+            echo "::error::メイン実行ファイルが見つかりません: ${exe}"
+            exit 1
+          fi
+
+          rpaths=$(otool -l "$exe" | awk '/LC_RPATH/{getline; getline; print $2}')
+          if [ -z "$rpaths" ]; then
+            echo "::error::${exe} に LC_RPATH がありません。"
+            status=1
+          fi
+          while IFS= read -r rp; do
+            [ -z "$rp" ] && continue
+            if [ "$rp" != "@executable_path/../Frameworks" ]; then
+              echo "::error::想定外の LC_RPATH: ${rp}"
+              status=1
+            fi
+          done <<< "$rpaths"
+
+          if [ "$status" != "0" ]; then
+            exit 1
+          fi
+          echo "OK: すべての依存が @rpath/@executable_path/@loader_path または OS 提供の /usr/lib, /System で解決できます。LC_RPATH も bundle 相対のみです。"
+
+      - name: Verify launch with Qt removed from the environment (macOS)
+        if: runner.os == 'macOS'
+        # 受け入れ基準の文字どおりの検証: 静的解析では代替できない。QT_QPA_PLATFORM
+        # （このジョブの env で offscreen に設定済み）を含む QT_* 環境変数を一切持たない
+        # env -i の素の環境で、アップロードされる bundle のコピーを直接起動し、3 秒後も
+        # 生きていることを確認する。過去に QT_QPA_PLATFORM=offscreen を残したまま試して
+        # 「Could not find the Qt platform plugin "offscreen"」で落ちた（macdeployqt が
+        # 展開するのは libqcocoa.dylib のみで libqoffscreen.dylib ではないため）。env -i
+        # で子プロセスの環境を完全に作り直すことでこの罠を踏まない。
+        shell: bash
+        run: |
+          set -eu
+          set -o pipefail
+
+          launch_dir="$RUNNER_TEMP/qt-free-launch-test"
+          rm -rf "$launch_dir"
+          mkdir -p "$launch_dir"
+          cp -R "$DEPLOY_TARGET" "$launch_dir/utsushi.app"
+          binary="$launch_dir/utsushi.app/Contents/MacOS/utsushi"
+          chmod +x "$binary"
+
+          stderr_log="$RUNNER_TEMP/qt-free-launch.stderr.log"
+          stdout_log="$RUNNER_TEMP/qt-free-launch.stdout.log"
+          : > "$stderr_log"
+          : > "$stdout_log"
+
+          env -i HOME="$HOME" USER="${USER:-runner}" PATH=/usr/bin:/bin TMPDIR="${TMPDIR:-/tmp}" \
+            "$binary" >"$stdout_log" 2>"$stderr_log" &
+          pid=$!
+
+          sleep 3
+
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "OK: pid ${pid} は Qt を除いた環境で 3 秒後も起動を継続しています。"
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+            exit 0
+          fi
+
+          # 注意: `wait` は素のコマンドとして書くと非ゼロ終了時に set -e で即座に
+          # スクリプトを打ち切ってしまい、以下のエラーメッセージと stderr の出力に
+          # 到達できない（ローカル検証で実際に踏んだ）。`|| status=$?` で無効化する。
+          status=0
+          wait "$pid" 2>/dev/null || status=$?
+          echo "::error::Qt を除去した環境での起動に失敗しました（exit ${status}）。stderr:"
+          cat "$stderr_log" >&2
+          echo "::error::stdout:"
+          cat "$stdout_log" >&2
+          exit 1
+
       - name: Verify LICENSE is bundled (Windows)
         if: runner.os == 'Windows'
         # ビルドツリーではなく、実際にアップロードするステージングディレクトリを検証する。
@@ -167,6 +288,180 @@ jobs:
             echo "::error::テスト実行ファイルが配布物 ${WIN_DIST_DIR} に混入しています。"
             exit 1
           fi
+
+      - name: Verify no missing DLL dependencies (Windows)
+        if: runner.os == 'Windows'
+        # 受け入れ基準「配布物が Qt 未インストールのクリーンな環境で起動する」の静的側面
+        # （macOS 側の "Verify no external Qt/Homebrew references" に対応）。ステージング
+        # 済みディレクトリ（$WIN_DIST_DIR。アップロードするものと同一）内のすべての
+        # exe/dll について dumpbin /dependents で直接依存を再帰的に辿り、同梱ファイルにも
+        # System32 にも存在しない DLL があれば失敗させる。dumpbin は PATH には無いため
+        # vswhere で Visual Studio のインストール位置から実パスを解決する。
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) {
+            Write-Host "::error::vswhere.exe が見つかりません: $vswhere"
+            exit 1
+          }
+          $vsInstall = & $vswhere -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath | Select-Object -First 1
+          if (-not $vsInstall) {
+            Write-Host "::error::vswhere が Visual Studio のインストールを見つけられませんでした。"
+            exit 1
+          }
+          $dumpbin = Get-ChildItem -Path "$vsInstall\VC\Tools\MSVC" -Filter dumpbin.exe -Recurse |
+            Where-Object { $_.FullName -like '*\Hostx64\x64\*' } |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $dumpbin) {
+            Write-Host "::error::dumpbin.exe が見つかりませんでした。"
+            exit 1
+          }
+
+          $stageDir = (Resolve-Path $env:WIN_DIST_DIR).Path
+          $system32 = "$env:SystemRoot\System32"
+
+          function Get-DirectDependencies($binaryPath) {
+            $output = & $dumpbin /dependents $binaryPath 2>$null
+            $inList = $false
+            $names = New-Object System.Collections.Generic.List[string]
+            foreach ($line in $output) {
+              if ($line -match 'Image has the following dependencies') { $inList = $true; continue }
+              if ($inList) {
+                $trimmed = $line.Trim()
+                if ($trimmed -eq '') { break }
+                $names.Add($trimmed)
+              }
+            }
+            return $names
+          }
+
+          $stagedFiles = Get-ChildItem -Path $stageDir -Recurse -File |
+            Where-Object { $_.Extension -in '.exe', '.dll' }
+          $stagedByName = @{}
+          foreach ($f in $stagedFiles) { $stagedByName[$f.Name.ToLowerInvariant()] = $f.FullName }
+
+          $visited = New-Object System.Collections.Generic.HashSet[string]
+          $queue = New-Object System.Collections.Generic.Queue[string]
+          foreach ($f in $stagedFiles) { $queue.Enqueue($f.FullName) }
+
+          $missing = New-Object System.Collections.Generic.List[object]
+
+          while ($queue.Count -gt 0) {
+            $current = $queue.Dequeue()
+            $key = $current.ToLowerInvariant()
+            if ($visited.Contains($key)) { continue }
+            [void]$visited.Add($key)
+
+            foreach ($dep in (Get-DirectDependencies $current)) {
+              $depLower = $dep.ToLowerInvariant()
+
+              # api-ms-win-*/ext-ms-* は Windows のバージョン管理機構（apisetschema）が
+              # 解決するフォワーダで、System32 に実ファイルとして存在するとは限らない。
+              # Windows 10 以降では常に解決可能とみなせる。
+              if ($depLower -like 'api-ms-win-*' -or $depLower -like 'ext-ms-*') { continue }
+
+              if ($stagedByName.ContainsKey($depLower)) {
+                $depPath = $stagedByName[$depLower]
+                if (-not $visited.Contains($depPath.ToLowerInvariant())) {
+                  $queue.Enqueue($depPath)
+                }
+                continue
+              }
+
+              if (Test-Path (Join-Path $system32 $dep)) { continue }
+
+              $missing.Add([PSCustomObject]@{ Binary = $current; Dependency = $dep })
+            }
+          }
+
+          if ($missing.Count -gt 0) {
+            Write-Host "::error::配布物に含まれない DLL 依存が見つかりました:"
+            foreach ($m in $missing) {
+              Write-Host "::error::  $($m.Binary) -> $($m.Dependency)"
+            }
+            exit 1
+          }
+
+          Write-Host "OK: $stageDir 配下のすべての exe/dll の依存が、同梱ファイルまたは System32 で解決できます。"
+
+      - name: Verify launch with Qt removed from the environment (Windows)
+        if: runner.os == 'Windows'
+        # 受け入れ基準の文字どおりの検証: 静的解析では代替できない（macOS 側の
+        # "Verify launch with Qt removed from the environment" に対応）。install-qt-action
+        # が PATH に追加した Qt の bin ディレクトリ（$QT_ROOT_DIR\bin）を除いた PATH と、
+        # QT_* を一切含まない環境変数だけで exe を起動し、3 秒後も生きていることを確認
+        # する。即座に終了した場合は stdout/stderr を出力して失敗させる。
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $exePath = Join-Path $env:WIN_DIST_DIR 'utsushi.exe'
+          if (-not (Test-Path $exePath)) {
+            Write-Host "::error::実行ファイルが見つかりません: $exePath"
+            exit 1
+          }
+          $exePath = (Resolve-Path $exePath).Path
+
+          # install-qt-action が設定する QT_ROOT_DIR（Qt インストールのルート）から
+          # bin ディレクトリを特定し、PATH から取り除く。
+          $qtBin = $null
+          if ($env:QT_ROOT_DIR) { $qtBin = (Join-Path $env:QT_ROOT_DIR 'bin').TrimEnd('\') }
+
+          $filteredPath = ($env:PATH -split ';' | Where-Object {
+            $_ -and (-not $qtBin -or $_.TrimEnd('\') -ne $qtBin)
+          }) -join ';'
+
+          $psi = New-Object System.Diagnostics.ProcessStartInfo
+          $psi.FileName = $exePath
+          $psi.UseShellExecute = $false
+          $psi.RedirectStandardError = $true
+          $psi.RedirectStandardOutput = $true
+          $psi.EnvironmentVariables.Clear()
+
+          # OS が動作するのに必要な最小限の環境変数だけを引き継ぐ。QT_ROOT_DIR /
+          # QT_PLUGIN_PATH / QML2_IMPORT_PATH / PKG_CONFIG_PATH / LD_LIBRARY_PATH /
+          # IQTA_TOOLS など install-qt-action が設定したものは一切引き継がない。
+          $keep = @('SystemRoot', 'windir', 'ComSpec', 'PATHEXT', 'TEMP', 'TMP',
+                    'USERPROFILE', 'ProgramData', 'SystemDrive', 'ALLUSERSPROFILE',
+                    'NUMBER_OF_PROCESSORS', 'PROCESSOR_ARCHITECTURE',
+                    'PROCESSOR_IDENTIFIER', 'OS')
+          foreach ($name in $keep) {
+            $val = [System.Environment]::GetEnvironmentVariable($name)
+            if ($val) { $psi.EnvironmentVariables[$name] = $val }
+          }
+          $psi.EnvironmentVariables['PATH'] = $filteredPath
+
+          $leaked = $psi.EnvironmentVariables.Keys | Where-Object { $_ -like 'QT_*' }
+          if ($leaked) {
+            Write-Host "::error::子プロセスの環境に QT_* 変数が残っています: $($leaked -join ', ')"
+            exit 1
+          }
+
+          $proc = New-Object System.Diagnostics.Process
+          $proc.StartInfo = $psi
+          [void]$proc.Start()
+
+          Start-Sleep -Seconds 3
+
+          if (-not $proc.HasExited) {
+            Write-Host "OK: pid $($proc.Id) は Qt を除いた環境で 3 秒後も起動を継続しています。"
+            $proc.Kill()
+            $proc.WaitForExit(5000) | Out-Null
+            exit 0
+          }
+
+          $stderrText = $proc.StandardError.ReadToEnd()
+          $stdoutText = $proc.StandardOutput.ReadToEnd()
+          Write-Host "::error::Qt を除去した環境での起動に失敗しました (exit code $($proc.ExitCode))。"
+          Write-Host "--- stdout ---"
+          Write-Host $stdoutText
+          Write-Host "--- stderr ---"
+          Write-Host $stderrText
+          exit 1
 
       - name: Upload artifact (macOS)
         if: runner.os == 'macOS'
