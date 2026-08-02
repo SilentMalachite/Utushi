@@ -68,12 +68,36 @@ cmake --build build --parallel
 # 2. テスト
 ctest --test-dir build --output-on-failure
 
-# 3. 静的解析
-clang-tidy -p build $(git diff --name-only --diff-filter=ACM HEAD~1 | grep -E '\.(cpp|hpp)$')
+# 3. 静的解析（レビュアーのローカル環境でのみ実行する。CI には含めない。理由は下記）
+cmake -B build-tidy -S . -DCMAKE_BUILD_TYPE=Debug \
+      -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+      -DCMAKE_PREFIX_PATH="$QT_ROOT"   # 例: /Users/hiro/Qt/6.11.1/macos
+/opt/homebrew/opt/llvm/bin/clang-tidy -p build-tidy \
+    --extra-arg="-isysroot$(xcrun --show-sdk-path)" --extra-arg=-stdlib=libc++ \
+    core/*.cpp app/*.cpp
 
 # 4. 不変条件スキャナ
 ctest --test-dir build -R no_hardcode --output-on-failure
 ```
+
+`clang-tidy` は `$PATH` に無い Homebrew LLVM 版（`/opt/homebrew/opt/llvm/bin/clang-tidy`）を使う。
+Xcode 付属の clang には clang-tidy が同梱されておらず代替できない。上記コマンドは macOS
+（Apple Clang SDK）向け。`build/`（手順 1 のビルド）とは別に `build-tidy/` を用意するのは、
+`compile_commands.json` の出力に `CMAKE_EXPORT_COMPILE_COMMANDS=ON` が要るため。リポジトリ
+ルートで実行すること（`core/*.cpp app/*.cpp` はカレントディレクトリ相対）。チェックセットは
+repo root の `.clang-tidy` に定義済みで、`-checks=` の個別指定は不要。
+
+`-isysroot`/`-stdlib=libc++` を付けないと Homebrew の clang-tidy は macOS SDK のヘッダを
+自力で見つけられず、`'type_traits' file not found` 等の `clang-diagnostic-error` を大量に
+出したまま **ほとんど解析せずに `exit code 0` で終わる**（中断であって成功ではない。exit
+code だけでは正常終了と区別できない）。**したがって「診断 0 件」は、出力に
+`clang-diagnostic-error` が 1 件も無いこと（`Found compiler error(s).` の行が出ていないこと）
+も合わせて確認して初めて意味を持つ。** `grep -c clang-diagnostic-error` で確認するとよい。
+
+このゲートは意図的に CI（`.github/workflows/ci.yml`）に含めていない。このチェックセットは
+MSVC で一度も検証しておらず、素性の分からない静的解析ゲートを現在 green な CI パイプライン
+に持ち込むと red 化のリスクだけを負う。Windows/MSVC 対応は将来の検討課題として、まずは
+レビュアー手動実行のゲートとして運用する。
 
 **4 つすべてが緑でない限り approve しない。**
 
