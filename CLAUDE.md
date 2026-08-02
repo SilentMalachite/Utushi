@@ -72,9 +72,9 @@ utsushi/
 │   ├── tst_page_range.cpp
 │   ├── tst_render_size.cpp
 │   ├── tst_output_path.cpp
-│   ├── tst_converter.cpp
-│   ├── tst_no_hardcode.cpp      # 規約スキャナ（不変条件テスト）
-│   └── fixtures/                # 小さな検証用 PDF
+│   ├── tst_converter.cpp        # 検証用 PDF は QPdfWriter で実行時に合成する（バイナリを
+│   │                              git に置かず、Qt バージョン間の差異でも壊れないため）
+│   └── tst_no_hardcode.cpp      # 規約スキャナ（不変条件テスト）
 └── packaging/
     ├── macos/
     └── windows/
