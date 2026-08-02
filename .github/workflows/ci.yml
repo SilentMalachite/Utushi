@@ -12,8 +12,19 @@ jobs:
         include:
           - os: macos-14          # arm64
             qt_arch: clang_64
+            qt_version: '6.11.*'  # 開発機の実 Qt（6.11.1）に合わせる
           - os: windows-2022      # x64
             qt_arch: win64_msvc2022_64
+            # ワークアラウンド: Qt は 2026-08-02 時点で Windows 向け 6.11.x（6.11.0/6.11.1、
+            # および直近の 6.12.0 も同様）のデスクトップバイナリを download.qt.io に公開して
+            # いない（`aqt list-qt windows desktop --arch 6.11.1` 等がアーキ一覧を返せず失敗する
+            # 一方、`aqt list-qt windows desktop --arch 6.10.3` や
+            # `aqt list-qt mac desktop --arch 6.11.1` は正常に解決する）。
+            # find_package(Qt6 6.8 REQUIRED ...) は下限指定であり 6.10 系も正当なビルド対象。
+            # Windows レグの目的は「MSVC /W4 /WX でこのコードを初めてコンパイルする」ことなので、
+            # 上流が Windows 向け 6.11.x を公開するまでの暫定措置として 6.10.* に固定する。
+            # 上流で 6.11.x の Windows バイナリが揃ったら 6.11.* に戻すことを検討する。
+            qt_version: '6.10.*'
     runs-on: ${{ matrix.os }}
     env:
       # tst_converter が QGuiApplication を要求するため、ヘッドレスランナーでは
@@ -25,9 +36,7 @@ jobs:
       - name: Install Qt (with qtpdf module)
         uses: jurplel/install-qt-action@v4
         with:
-          # 開発機・CI は Qt 6.11.x を使う。find_package(Qt6 6.8 REQUIRED ...) は下限指定なので
-          # コード側は無変更で通る。バージョンはここだけ実態（開発機 6.11.1）に合わせる。
-          version: '6.11.*'
+          version: ${{ matrix.qt_version }}
           arch: ${{ matrix.qt_arch }}
           modules: 'qtpdf' # 明示しないと find_package(Qt6 COMPONENTS Pdf) が失敗する
 
