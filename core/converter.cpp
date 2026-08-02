@@ -22,12 +22,18 @@ namespace utsushi {
 QString loadErrorText(QPdfDocument::Error error) {
     switch (error) {
     case QPdfDocument::Error::IncorrectPassword:
-        return QCoreApplication::translate("Converter", "パスワードが違うか、未入力です");
+    case QPdfDocument::Error::UnsupportedSecurityScheme:
+        // パスワード保護・暗号化 PDF は非対応スコープ（開発者判断）。QPdfWriter が
+        // 暗号化 PDF を作れず、この経路を検証するフィクスチャが作れないため、
+        // パスワード再入力機能そのものを持たない。「パスワードが違います」のような
+        // 再試行を示唆する文言や、汎用の「読み込めません」（壊れているという印象を
+        // 与える）は使わず、非対応であることを明示する。
+        return QCoreApplication::translate("Converter",
+            "パスワード保護・暗号化された PDF には対応していません");
     case QPdfDocument::Error::FileNotFound:
         return QCoreApplication::translate("Converter", "ファイルが見つかりません");
     case QPdfDocument::Error::InvalidFileFormat:
     case QPdfDocument::Error::DataNotYetAvailable:
-    case QPdfDocument::Error::UnsupportedSecurityScheme:
     default:
         return QCoreApplication::translate("Converter", "PDF として読み込めません");
     }
@@ -156,9 +162,6 @@ void Converter::run(const std::vector<ConversionJob>& jobs) {
 
         // QPdfDocument はワーカースレッド（= このメソッドの実行スレッド）だけが触る
         auto doc = std::make_unique<QPdfDocument>();
-        if (!job.password.isEmpty()) {
-            doc->setPassword(job.password);
-        }
         if (doc->load(job.inputPdfPath) != QPdfDocument::Error::None) {
             summary.failures.push_back({job.inputPdfPath, 0, loadErrorText(doc->error())});
             ++summary.failedPages;

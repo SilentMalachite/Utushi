@@ -16,7 +16,6 @@ struct ConversionJob {
     std::vector<int> pages;   // 1 始まり。空なら全ページ
     double dpi = 300.0;
     OverwritePolicy overwritePolicy = OverwritePolicy::Skip;
-    QString password;         // パスワード保護 PDF 用。UI 側が取得して渡す（空なら無し）
 };
 
 struct PageFailure {

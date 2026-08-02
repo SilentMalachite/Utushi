@@ -34,7 +34,8 @@ private:
     void chooseOutputDir();
     void startConversion();
     // ジョブ構築。UI スレッド専用の QPdfDocument で各ファイルを事前検査し、
-    // ページ数取得・範囲検証・パスワード取得（1 回だけ問う）を行う。
+    // ページ数取得・範囲検証を行う。パスワード保護・暗号化 PDF は非対応スコープ
+    // （開発者判断）のため再試行せず、loadErrorText() の「非対応」文言で失敗させる。
     // 検証に失敗したファイルは jobs に入れず failures に積む。
     [[nodiscard]] std::vector<ConversionJob> buildJobs(std::vector<PageFailure>& failures);
     void onFileStarted(int fileIndex, int fileCount, const QString& filePath);

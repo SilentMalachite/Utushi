@@ -12,7 +12,6 @@
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QHBoxLayout>
-#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -217,27 +216,16 @@ std::vector<ConversionJob> MainWindow::buildJobs(std::vector<PageFailure>& failu
 
     for (int i = 0; i < m_fileList->count(); ++i) {
         const QString path = m_fileList->item(i)->text();
-        // UI スレッド専用の QPdfDocument で事前検査（ワーカーの doc とは別インスタンス）
+        // UI スレッド専用の QPdfDocument で事前検査（ワーカーの doc とは別インスタンス）。
+        // パスワード保護・暗号化 PDF は非対応スコープ（開発者判断）: QPdfWriter が
+        // 暗号化 PDF を作れず実行証跡ゼロのままだったパスワード再入力機能を落としたため、
+        // ここで再試行せず loadErrorText() の「非対応」文言をそのまま失敗として記録する。
         auto probe = std::make_unique<QPdfDocument>();
-        QPdfDocument::Error error = probe->load(path);
-        QString password;
-        if (error == QPdfDocument::Error::IncorrectPassword) {
-            // パスワードは 1 回だけ問う。キャンセルなら失敗として記録
-            bool entered = false;
-            password = QInputDialog::getText(this, tr("パスワード"),
-                tr("%1 のパスワード:").arg(QFileInfo(path).fileName()),
-                QLineEdit::Password, QString(), &entered);
-            if (!entered) {
-                failures.push_back({path, 0, tr("パスワード入力がキャンセルされました")});
-                continue;
-            }
-            probe->setPassword(password);
-            error = probe->load(path);
-        }
+        const QPdfDocument::Error error = probe->load(path);
         if (error != QPdfDocument::Error::None) {
             // core::loadErrorText() を再利用する。事前検査（ここ）とワーカー
             // （Converter::run()）が別々のエラー文言ロジックを持つと、同じ失敗原因
-            // （例: パスワード誤り）でも通った経路によって表示が食い違う
+            // （例: パスワード保護・暗号化された PDF）でも通った経路によって表示が食い違う
             // （2026-08-02 レビュー Blocker 修正）。
             failures.push_back({path, 0, loadErrorText(error)});
             continue;
@@ -254,7 +242,6 @@ std::vector<ConversionJob> MainWindow::buildJobs(std::vector<PageFailure>& failu
         job.pages = *pages;
         job.dpi = dpi;
         job.overwritePolicy = policy;
-        job.password = password;
         jobs.push_back(std::move(job));
     }
     return jobs;

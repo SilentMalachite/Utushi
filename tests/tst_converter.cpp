@@ -16,6 +16,7 @@ using namespace Qt::StringLiterals;
 using utsushi::ConversionJob;
 using utsushi::ConversionSummary;
 using utsushi::Converter;
+using utsushi::loadErrorText;
 using utsushi::OverwritePolicy;
 
 namespace {
@@ -675,6 +676,29 @@ private slots:
         const auto summary = lastSummary(finishedSpy);
         QCOMPARE(summary.failedPages, 1);
         QCOMPARE(summary.failures.front().pageNumber, 1);
+    }
+
+    // パスワード保護 PDF は非対応スコープ（開発者判断）: QPdfWriter は暗号化 PDF を
+    // 作れないため、この経路のフィクスチャは作れず一度も実行されたことがない。
+    // 実行証跡ゼロの機能はリスクでしかないため、パスワード再入力の機能そのものを
+    // 落とし、「非対応」という明確な失敗として扱う。ただし失われてはいけない
+    // 振る舞いが 2 つある: (1) IncorrectPassword と UnsupportedSecurityScheme は
+    // どちらも「非対応」の同じ文言に落ちる、(2) その文言は壊れたファイル用の
+    // 汎用文言（「PDF として読み込めません」）とは異なる。汎用文言のままだと、
+    // パスワード保護されているだけの正常なファイルが「壊れている」と誤解される。
+    void passwordProtectedPdfReportsNotSupportedNotGenericFailure() {
+        const QString incorrectPasswordText =
+            loadErrorText(QPdfDocument::Error::IncorrectPassword);
+        const QString unsupportedSchemeText =
+            loadErrorText(QPdfDocument::Error::UnsupportedSecurityScheme);
+        const QString genericUnreadableText =
+            loadErrorText(QPdfDocument::Error::InvalidFileFormat);
+
+        QCOMPARE(incorrectPasswordText, unsupportedSchemeText);
+        QVERIFY2(incorrectPasswordText != genericUnreadableText,
+                 qPrintable(incorrectPasswordText));
+        QVERIFY2(incorrectPasswordText.contains(u"パスワード"_s),
+                 qPrintable(incorrectPasswordText));
     }
 };
 
