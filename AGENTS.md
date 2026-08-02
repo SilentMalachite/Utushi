@@ -53,7 +53,7 @@ Codex は **Claude Code が書いたコードのレビュアー**であり、既
 6. **エラーの非握り潰し**: `QPdfDocument::Error` と `QImage::save()` の戻り値がすべて検査されている。バッチ処理が 1 件の失敗で全体停止していない。
 7. **Qt5 API の不在**: `QRegExp` / `SIGNAL()` / `SLOT()` / `foreach` / `qrand()` / `QString::null` が存在しない。
 8. **例外の不在**: `throw` / `try` が存在しない。失敗は戻り値で表現されている。
-9. **DPI 換算定数の一元化**: リテラル `72`（pt→inch 換算）が `render_size.cpp` 以外に現れていない。
+9. **DPI 換算定数の一元化**: リテラル `72`（pt→inch 換算）が `render_size.hpp` / `render_size.cpp` 以外に現れていない。定数は `render_size.hpp` に `inline constexpr` として定義されており、これが唯一の定義箇所である（`app/` が DPI プリセットを組み立てる際にリテラルを書き写さず、このヘッダの定数を再利用できるようにするため）。
 10. **ページ番号の一貫性**: 1 始まり（UI / ファイル名）と 0 始まり（`QPdfDocument` の API）の変換が、境界を跨ぐ 1 箇所でのみ行われている。**このオフバイワンは本アプリで最も起きやすいバグ。毎回明示的に確認する。**
 
 ---

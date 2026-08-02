@@ -148,7 +148,7 @@ namespace utsushi {
 3. `tst_no_hardcode.cpp` を不変条件テストとして維持する。以下を検出したら **失敗させる**：
    - `core/` 配下に `#include <QtWidgets` が現れる
    - `QMessageBox` / `qDebug` が `core/` に現れる
-   - マジックナンバー `72`（DPI 換算定数）が `render_size.cpp` 以外に現れる
+   - マジックナンバー `72`（DPI 換算定数）が `render_size.hpp` / `render_size.cpp` 以外に現れる（定数は `render_size.hpp` に `inline constexpr` として定義し、`app/` の DPI プリセット組み立てがそれを再利用する）
    - `new` の直後に `delete` を伴わない生ポインタ（親を持たない `QObject` 生成）
 
 テストが通らないコードはコミットしない。
