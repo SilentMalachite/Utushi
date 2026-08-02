@@ -341,6 +341,79 @@ private slots:
         QVERIFY(!QFileInfo::exists(dir.path() + u"/doc_p003.png"_s));
     }
 
+    // Fix wave 2, finding 1: 別ディレクトリにある同名 stem の 2 ファイルが同じ出力先へ
+    // 変換されるとき、無言でスキップするのではなく明示的な衝突として報告すること。
+    void duplicateStemAcrossInputDirsIsReportedAsConflict() {
+        QTemporaryDir dirA;
+        QTemporaryDir dirB;
+        QTemporaryDir outDir;
+        QVERIFY(dirA.isValid());
+        QVERIFY(dirB.isValid());
+        QVERIFY(outDir.isValid());
+        const QString pdfA = writeSamplePdf(dirA.path(), u"report.pdf"_s, 1);
+        const QString pdfB = writeSamplePdf(dirB.path(), u"report.pdf"_s, 1);
+
+        ConversionJob jobA;
+        jobA.inputPdfPath = pdfA;
+        jobA.outputDirPath = outDir.path();
+        jobA.dpi = 150.0;
+        ConversionJob jobB;
+        jobB.inputPdfPath = pdfB;
+        jobB.outputDirPath = outDir.path();
+        jobB.dpi = 150.0;
+        // overwritePolicy は既定 (Skip) のまま
+
+        Converter converter;
+        QSignalSpy finishedSpy(&converter, &Converter::finished);
+        converter.run({jobA, jobB});
+
+        const auto summary = lastSummary(finishedSpy);
+        QCOMPARE(summary.succeededPages, 1);   // 1 件目だけが変換される
+        QCOMPARE(summary.skippedPages, 0);     // "スキップ" ではなく明示的な失敗として扱う
+        QCOMPARE(summary.failedPages, 1);
+        QCOMPARE(summary.failures.size(), std::size_t{1});
+        QCOMPARE(summary.failures.front().filePath, pdfB);
+        QCOMPARE(summary.failures.front().pageNumber, 0);
+        QVERIFY2(summary.failures.front().reason.contains(pdfA),
+                 qPrintable(summary.failures.front().reason));   // どのファイルと衝突したか分かる
+        QVERIFY(QFileInfo::exists(outDir.path() + u"/report_p001.png"_s));
+    }
+
+    // Fix wave 2, finding 1 (Overwrite): 衝突する 2 件目は Overwrite でも処理されず、
+    // 1 件目の出力を同一バッチ内で破壊しないこと。
+    void duplicateStemConflictPreventsOverwriteDestroyingFirstOutput() {
+        QTemporaryDir dirA;
+        QTemporaryDir dirB;
+        QTemporaryDir outDir;
+        QVERIFY(dirA.isValid());
+        QVERIFY(dirB.isValid());
+        QVERIFY(outDir.isValid());
+        const QString pdfA = writeSamplePdf(dirA.path(), u"report.pdf"_s, 2);
+        const QString pdfB = writeSamplePdf(dirB.path(), u"report.pdf"_s, 3);
+
+        ConversionJob jobA;
+        jobA.inputPdfPath = pdfA;
+        jobA.outputDirPath = outDir.path();
+        jobA.dpi = 150.0;
+        jobA.overwritePolicy = OverwritePolicy::Overwrite;
+        ConversionJob jobB;
+        jobB.inputPdfPath = pdfB;
+        jobB.outputDirPath = outDir.path();
+        jobB.dpi = 150.0;
+        jobB.overwritePolicy = OverwritePolicy::Overwrite;
+
+        Converter converter;
+        QSignalSpy finishedSpy(&converter, &Converter::finished);
+        converter.run({jobA, jobB});
+
+        const auto summary = lastSummary(finishedSpy);
+        QCOMPARE(summary.succeededPages, 2);   // jobA の 2 ページのみ
+        QCOMPARE(summary.failedPages, 1);
+        QVERIFY(QFileInfo::exists(outDir.path() + u"/report_p001.png"_s));
+        QVERIFY(QFileInfo::exists(outDir.path() + u"/report_p002.png"_s));
+        QVERIFY(!QFileInfo::exists(outDir.path() + u"/report_p003.png"_s));   // jobB は処理されていない
+    }
+
     // DPI 過大: renderSizeFor が nullopt を返し、ページ失敗として記録される
     void oversizedDpiFailsPage() {
         QTemporaryDir dir;

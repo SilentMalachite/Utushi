@@ -6,6 +6,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QHash>
 #include <QImage>
 #include <QPdfDocument>
 
@@ -62,6 +63,17 @@ void Converter::run(const std::vector<ConversionJob>& jobs) {
     const int fileCount = static_cast<int>(jobs.size());
     int fileIndex = 0;
 
+    // 出力先ディレクトリ + stem が重複するジョブを検出する。同じバッチ内で
+    // 別ディレクトリの同名ファイル（例: ~/x/report.pdf と ~/y/report.pdf）を
+    // 同じ出力先へ変換すると、どちらも "report_pNNN.png" という同じファイル名を
+    // 生成する。Skip では 2 件目が理由不明のまま黙って消え、Overwrite では
+    // 2 件目が 1 件目の出力を同一バッチ内で破壊する（ユーザーが Overwrite で
+    // 意図したのは「前回実行の古い出力を上書きする」ことであり、これではない）。
+    // バッチ内で最初に現れたファイルだけを処理し、以降の同名衝突は
+    // レンダリングを試みず、既存の失敗報告チャンネルで衝突として報告する
+    // （Fix wave 2, finding 1）。
+    QHash<QString, QString> claimedOutputs;   // key: 出力先+stem → 先に確保した入力ファイル
+
     for (const ConversionJob& job : jobs) {
         // ファイル境界でもキャンセルを確認する。run() 開始前に届いたキャンセルも
         // ここで最初に検出される（1 ファイル目にも着手しない）。
@@ -72,6 +84,21 @@ void Converter::run(const std::vector<ConversionJob>& jobs) {
         }
         ++fileIndex;
         emit fileStarted(fileIndex, fileCount, job.inputPdfPath);
+
+        const QString stem = QFileInfo(job.inputPdfPath).completeBaseName();
+        const QString outputKey =
+            QDir(job.outputDirPath).absolutePath() + QChar(u'\x1f') + stem;
+        const auto claimedIt = claimedOutputs.constFind(outputKey);
+        if (claimedIt != claimedOutputs.constEnd()) {
+            summary.failures.push_back({job.inputPdfPath, 0,
+                QCoreApplication::translate("Converter",
+                    "出力ファイル名が %1 と重複するため変換していません"
+                    "（同じ出力先に同じファイル名で書き込まれます）")
+                    .arg(claimedIt.value())});
+            ++summary.failedPages;
+            continue;   // 1 件の衝突でバッチを止めない。このファイルだけ変換しない
+        }
+        claimedOutputs.insert(outputKey, job.inputPdfPath);
 
         // 出力先の書き込み可否は変換開始前に検査。書けなければバッチ全体を中止。
         const QDir outDir(job.outputDirPath);
@@ -102,7 +129,7 @@ void Converter::run(const std::vector<ConversionJob>& jobs) {
                 pages.push_back(p);
             }
         }
-        const QString stem = QFileInfo(job.inputPdfPath).completeBaseName();
+        // stem はファイル冒頭（衝突検出時）で計算済み
         const int plannedInFile = static_cast<int>(pages.size());
         int doneInFile = 0;
 
