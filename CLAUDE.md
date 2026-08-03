@@ -52,10 +52,16 @@ GUI は Qt Widgets。macOS (arm64) と Windows (x64) の2プラットフォー�
 ```
 utsushi/
 ├── CMakeLists.txt
+├── README.md                # 人間向けの入口
+├── CHANGELOG.md
 ├── CLAUDE.md
 ├── AGENTS.md
 ├── docs/
-│   └── qt-conventions.md
+│   ├── qt-conventions.md    # 実装規約
+│   ├── build.md             # ビルド・テスト・配布物
+│   ├── usage.md             # 使い方と仕様（エラー文言の一覧を含む）
+│   ├── known-issues.md      # 既知の問題・意図的な非対応・未検証項目
+│   └── progress.md          # 進捗ログと決定事項
 ├── core/                    # ← Qt Widgets に依存しない。Core + Gui + Pdf のみ
 │   ├── CMakeLists.txt
 │   ├── page_range.hpp/.cpp      # 純粋関数: "1-5,8" → std::vector<int>
@@ -190,15 +196,17 @@ namespace utsushi {
 ## 受け入れ基準（v0.1.0）
 
 以下がすべて満たされたときに v0.1.0 とする。
+**チェックを入れてよいのは、CI かコミット済みのテストで実証できる項目だけ。根拠を併記する。**
+未チェックの項目の現状は `docs/known-issues.md` に書く。
 
-- [ ] macOS (arm64) と Windows (x64) の GitHub Actions で、ビルドと `ctest` が緑
-- [ ] 100 ページの PDF を 300 DPI で変換中、UI が応答し続ける
-- [ ] 変換中にキャンセルすると 1 秒以内にワーカーが停止し、途中までの PNG は残る
-- [ ] 壊れた PDF を含む 3 ファイルのバッチで、正常 2 件が変換され、失敗 1 件がサマリに理由付きで表示される
-- [ ] 既存の出力ファイルが `Skip` 設定で上書きされない
-- [ ] `tst_no_hardcode` が緑
+- [x] macOS (arm64) と Windows (x64) の GitHub Actions で、ビルドと `ctest` が緑（`.github/workflows/ci.yml` の `build-test` マトリクス。macos-14 / windows-2022 の両レグが緑）
+- [ ] 100 ページの PDF を 300 DPI で変換中、UI が応答し続ける（設計上は満たすはずだが実測の記録がない。`docs/known-issues.md`）
+- [ ] 変換中にキャンセルすると 1 秒以内にワーカーが停止し、途中までの PNG は残る（ページ境界での停止と途中 PNG の残存は `tst_converter::cancelStopsAtPageBoundary` で検証済み。**「1 秒以内」という時間境界をアサートするテストがないため未チェック**）
+- [x] 壊れた PDF を含む 3 ファイルのバッチで、正常 2 件が変換され、失敗 1 件がサマリに理由付きで表示される（`tst_converter::batchContinuesAfterBrokenFile` が 3 ファイル中 2 件の変換と理由付きの失敗 1 件を、`tst_main_window::summaryCountsCombinePreflightAndWorkerFailures` / `preflightFailureNamesSpecificReasonForMissingFile` がサマリへの理由表示を検証）
+- [x] 既存の出力ファイルが `Skip` 設定で上書きされない（`tst_converter::skipPolicyDoesNotOverwrite`）
+- [x] `tst_no_hardcode` が緑（CI の Test ステップに含まれる）
 - [x] `macdeployqt` / `windeployqt` を通した配布物が、Qt 未インストールのクリーンな環境で起動する（CI の "Verify no external Qt/Homebrew references" [macOS] / "Verify no missing DLL dependencies" [Windows] による静的検証と、"Verify launch with Qt removed from the environment" による両OSでの実起動検証で継続的に確認する。`.github/workflows/ci.yml` 参照）
-- [ ] Qt を動的リンクしており、`ヘルプ > ライセンス` から LGPLv3 の告知と Qt のソース入手先を表示できる
+- [ ] Qt を動的リンクしており、`ヘルプ > ライセンス` から LGPLv3 の告知と Qt のソース入手先を表示できる（動的リンクは CI の "Verify Qt frameworks deployed" [macOS] / "Verify Qt DLLs deployed" [Windows] で検証済み。**ダイアログの内容を検証するテストが `tst_main_window` にないため未チェック**。`docs/known-issues.md`）
 
 ---
 
