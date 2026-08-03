@@ -1,5 +1,8 @@
 #include <QtTest>
+#include <QAction>
+#include <QApplication>
 #include <QComboBox>
+#include <QDialog>
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
@@ -10,6 +13,7 @@
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QTimer>
 
 #include "app/main_window.hpp"
 
@@ -256,6 +260,60 @@ private slots:
         QVERIFY2(progressLabel->text() != u"完了"_s, qPrintable(progressLabel->text()));
         QVERIFY2(summaryView->toPlainText().contains(missingPdf),
                  qPrintable(summaryView->toPlainText()));
+    }
+
+    // 受け入れ基準「`ヘルプ > ライセンス` から LGPLv3 の告知と Qt のソース入手先を
+    // 表示できる」を恒久的に検証する。Task 9 ではリポジトリ外の使い捨てドライバで
+    // 一度確認しただけだったため、文言を消しても CI では検出できなかった。
+    //
+    // LGPLv3 で動的リンクする以上、この告知とソース入手先の提示はライセンス上の義務で
+    // あり、UI の装飾ではない。壊れたことに気づけないままリリースする経路を塞ぐ。
+    void licenseActionShowsGplNoticeAndQtSourceUrl() {
+        MainWindow window;
+
+        QAction* licenseAction = nullptr;
+        for (QAction* action : window.findChildren<QAction*>()) {
+            if (action->text().contains(u"ライセンス"_s)) {
+                licenseAction = action;
+                break;
+            }
+        }
+        QVERIFY2(licenseAction, "ヘルプメニューに「ライセンス」アクションがない");
+
+        // LicenseDialog::exec() は入れ子のイベントループへ入るので、trigger() から
+        // 戻ってくるにはループの中からダイアログを閉じる必要がある。ダイアログは
+        // exec() がループへ入る前に表示されるため、キューイングされたこのタイマーが
+        // 発火する時点ではトップレベルウィジェットとして存在している。
+        QString dialogText;
+        bool dialogSeen = false;
+        QTimer::singleShot(0, &window, [&dialogText, &dialogSeen] {
+            for (QWidget* widget : QApplication::topLevelWidgets()) {
+                auto* dialog = qobject_cast<QDialog*>(widget);
+                if (!dialog) {
+                    continue;
+                }
+                if (auto* view = dialog->findChild<QPlainTextEdit*>()) {
+                    dialogText = view->toPlainText();
+                }
+                dialogSeen = true;
+                dialog->reject();
+            }
+        });
+        // 保険: 万一ダイアログを掴み損ねても入れ子ループを抜けられるようにする
+        //（掴めていなければ dialogSeen が false のままなので、ハングではなく失敗になる）。
+        QTimer::singleShot(5000, &window, [] { QApplication::closeAllWindows(); });
+
+        licenseAction->trigger();
+
+        QVERIFY2(dialogSeen, "ライセンスアクションがダイアログを表示しなかった");
+        // 本アプリ自身のライセンスは "GPLv3" ではなく完全名で確認する。"GPLv3" は
+        // Qt 側の "LGPLv3" の部分文字列でもあるため、本アプリのライセンス表記が
+        // 丸ごと消えても Qt 側の行だけで表明が通ってしまう（mutation で確認済み）。
+        QVERIFY2(dialogText.contains(u"GNU General Public License v3.0"_s),
+                 qPrintable(dialogText));
+        QVERIFY2(dialogText.contains(u"LGPLv3"_s), qPrintable(dialogText));
+        QVERIFY2(dialogText.contains(u"download.qt.io"_s), qPrintable(dialogText));
+        QVERIFY2(dialogText.contains(u"PDFium"_s), qPrintable(dialogText));
     }
 };
 
