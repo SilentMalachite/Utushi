@@ -463,16 +463,41 @@ jobs:
           Write-Host $stderrText
           exit 1
 
+      - name: Archive the macOS bundle
+        if: runner.os == 'macOS'
+        # ディレクトリのまま upload-artifact に渡すと symlink が解決されてコピーに
+        # 置き換わる。.app 内の Qt フレームワークは Versions/Current 等の symlink で
+        # 構成されているため、それが失われると同じバイナリが二重に入って配布物が
+        # 倍に膨らみ（実測 98MB -> 193MB）、macdeployqt が作った署名とも構造が
+        # 食い違う。1 つのファイルとして固めてから渡すことで、ダウンロードした
+        # ものが CI で検証したものと同一になる。ditto は macOS の symlink と
+        # リソースフォークを保つ（zip コマンドと違い .app の構造を壊さない）。
+        shell: bash
+        run: |
+          set -eu
+          ditto -c -k --sequesterRsrc --keepParent "$DEPLOY_TARGET" utsushi-macos-arm64.zip
+          unzip -l utsushi-macos-arm64.zip | tail -1
+
+      - name: Archive the Windows distributable
+        if: runner.os == 'Windows'
+        # Windows 側に symlink の問題はないが、macOS と同じく「配布物 = 1 つの
+        # アーカイブ」に揃える。二重 zip を避けるためディレクトリではなくこの
+        # ファイルをアップロードする。
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "$env:WIN_DIST_DIR\*" -DestinationPath utsushi-windows-x64.zip
+          Get-Item utsushi-windows-x64.zip | Select-Object Name, Length
+
       - name: Upload artifact (macOS)
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
           name: utsushi-macos-arm64
-          path: ${{ env.ARTIFACT_DIR }}
+          path: utsushi-macos-arm64.zip
 
       - name: Upload artifact (Windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: utsushi-windows-x64
-          path: ${{ env.WIN_DIST_DIR }}
+          path: utsushi-windows-x64.zip
