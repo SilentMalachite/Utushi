@@ -198,11 +198,12 @@ namespace utsushi {
 ## 受け入れ基準（v0.1.0）
 
 以下がすべて満たされたときに v0.1.0 とする。
-**チェックを入れてよいのは、CI かコミット済みのテストで実証できる項目だけ。根拠を併記する。**
-未チェックの項目の現状は `docs/known-issues.md` に書く。
+**チェックを入れてよいのは、根拠を示せる項目だけ。根拠は必ず併記する。** 根拠として認めるのは
+(a) CI のステップ、(b) コミット済みのテスト、(c) 自動化できない項目に限り、実施者と日付を明記した人手検証——の 3 つだけ。
+「実装したから」「設計上そうなるはず」は根拠ではない。未チェックの項目の現状は `docs/known-issues.md` に書く。
 
 - [x] macOS (arm64) と Windows (x64) の GitHub Actions で、ビルドと `ctest` が緑（`.github/workflows/ci.yml` の `build-test` マトリクス。macos-14 / windows-2022 の両レグが緑）
-- [ ] 100 ページの PDF を 300 DPI で変換中、UI が応答し続ける（設計上は満たすはずだが実測の記録がない。`docs/known-issues.md`）
+- [x] 100 ページの PDF を 300 DPI で変換中、UI が応答し続ける（自動化していない。開発者が実機で確認: macOS, 2026-08-04。100 ページ / 300 DPI の変換中にウィンドウ操作と進捗テキストの更新が継続し、キャンセルも即座に効くことを目視）
 - [x] 変換中にキャンセルすると 1 秒以内にワーカーが停止し、途中までの PNG は残る（`tst_converter::cancelFromAnotherThreadStopsWithinOneSecond` が、ワーカースレッドへ `moveToThread` した `Converter` に別スレッドから `requestCancel()` を送り、`finished` までの経過時間が 1 秒未満であることと途中 PNG の残存を検証。ページ境界で止まること自体は `cancelStopsAtPageBoundary`）
 - [x] 壊れた PDF を含む 3 ファイルのバッチで、正常 2 件が変換され、失敗 1 件がサマリに理由付きで表示される（`tst_converter::batchContinuesAfterBrokenFile` が 3 ファイル中 2 件の変換と理由付きの失敗 1 件を、`tst_main_window::summaryCountsCombinePreflightAndWorkerFailures` / `preflightFailureNamesSpecificReasonForMissingFile` がサマリへの理由表示を検証）
 - [x] 既存の出力ファイルが `Skip` 設定で上書きされない（`tst_converter::skipPolicyDoesNotOverwrite`）
