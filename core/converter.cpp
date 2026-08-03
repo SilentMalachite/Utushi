@@ -8,6 +8,7 @@
 #include <QFileInfo>
 #include <QHash>
 #include <QImage>
+#include <QPainter>
 #include <QPdfDocument>
 
 #include <memory>
@@ -208,7 +209,7 @@ void Converter::run(const std::vector<ConversionJob>& jobs) {
                 emit pageDone(doneInFile, plannedInFile);
                 continue;
             }
-            const QImage image = doc->render(pageIndex, *size);
+            QImage image = doc->render(pageIndex, *size);
             if (image.isNull()) {
                 summary.failures.push_back({job.inputPdfPath, pageNumber,
                     QCoreApplication::translate("Converter", "ページのレンダリングに失敗しました")});
@@ -217,6 +218,19 @@ void Converter::run(const std::vector<ConversionJob>& jobs) {
                 emit pageDone(doneInFile, plannedInFile);
                 continue;
             }
+            // QPdfDocument::render() は紙の色を塗らず、背景が完全に透明なアルファ付き
+            // 画像を返す（実測: A4 300dpi の 1 ページで 8,696,332px 中 8,618,300px が
+            // alpha=0、不透明な白は 0px）。そのまま PNG にすると「白い紙に黒い文字」
+            // ではなく「透明な背景に黒い文字」になり、ダークモードのビューアでは背景が
+            // 暗く表示されて文字が溶け、何も見えなくなる（開発者報告、2026-08-04）。
+            // 描画済みの内容の「下」へ白を敷いて紙を再現する。
+            // CompositionMode_DestinationOver で既存の画素を上書きせずに合成するため、
+            // 白い画像をもう 1 枚確保して重ねる方式と違い、ピークメモリを倍にしない
+            //（1 辺 20000px の上限では 1 枚で 1.6GB に達する）。
+            QPainter painter(&image);
+            painter.setCompositionMode(QPainter::CompositionMode_DestinationOver);
+            painter.fillRect(image.rect(), Qt::white);
+            painter.end();
 
             QString outPath = outDir.filePath(outputFileName(stem, pageNumber, totalPages));
             bool saved = false;

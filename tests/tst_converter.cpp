@@ -102,6 +102,52 @@ private slots:
         }
     }
 
+    // QPdfDocument::render() は紙の色を塗らず、背景が完全に透明なアルファ付き画像を
+    // 返す。それをそのまま保存すると出力 PNG は「白い紙に黒い文字」ではなく
+    // 「透明な背景に黒い文字」になり、ダークモードのビューアでは背景が暗く表示されて
+    // 文字が溶け、何も見えなくなる（開発者報告、2026-08-04）。
+    // 実測値: A4 1 ページを 300dpi で描画すると 8,696,332px 中 8,618,300px が
+    // alpha=0、不透明な白は 0px だった。
+    // PNG は紙の見た目を再現しなければならない。
+    void savedPngIsOpaqueOnWhitePaper() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString pdf = writeSamplePdf(dir.path(), u"paper.pdf"_s, 1);
+
+        ConversionJob job;
+        job.inputPdfPath = pdf;
+        job.outputDirPath = dir.path();
+        job.dpi = 100.0;
+
+        Converter converter;
+        QSignalSpy finishedSpy(&converter, &Converter::finished);
+        converter.run({job});
+        QCOMPARE(lastSummary(finishedSpy).succeededPages, 1);
+
+        const QImage png(dir.path() + u"/paper_p001.png"_s);
+        QVERIFY(!png.isNull());
+
+        // 透けている画素が 1 つもないこと。アルファチャンネルの有無ではなく
+        // 「透けていない」ことを契約にする（不透明な alpha=255 を保持する実装も正しい）。
+        int translucent = 0;
+        int white = 0;
+        for (int y = 0; y < png.height(); ++y) {
+            for (int x = 0; x < png.width(); ++x) {
+                const QRgb c = png.pixel(x, y);
+                if (qAlpha(c) != 255) {
+                    ++translucent;
+                } else if (qRed(c) == 255 && qGreen(c) == 255 && qBlue(c) == 255) {
+                    ++white;
+                }
+            }
+        }
+        QCOMPARE(translucent, 0);
+        // 余白が紙の白であること。文字は左上にしか描かれないので、大半は白になる。
+        QVERIFY2(white > png.width() * png.height() / 2,
+                 qPrintable(u"白い画素が %1 / %2 しかない"_s
+                                .arg(white).arg(png.width() * png.height())));
+    }
+
     void respectsPageSelection() {
         QTemporaryDir dir;
         const QString pdf = writeSamplePdf(dir.path(), u"sel.pdf"_s, 5);
