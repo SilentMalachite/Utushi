@@ -29,7 +29,9 @@ Linux でも動くように書いていますが、CI では検証していま�
 
 ## 状態
 
-**v0.1.0 は開発中で、まだリリースしていません。** タグ付きリリースも、署名・公証済みのインストーラの配布もまだありません。使うにはソースからビルドしてください（[docs/build.md](docs/build.md)）。
+**v0.1.0 をリリースしました**（2026-08-04）。macOS (arm64) と Windows (x64) のビルドを [Releases](https://github.com/SilentMalachite/Utushi/releases/latest) から入手できます。ソースからビルドすることもできます（[docs/build.md](docs/build.md)）。
+
+**配布物は未署名です。** 初回起動時に macOS では Gatekeeper、Windows では SmartScreen に警告されます。開き方は [docs/known-issues.md](docs/known-issues.md#配布物に署名や公証をしていない) を参照してください。
 
 - 受け入れ基準の達成状況: [CLAUDE.md の「受け入れ基準（v0.1.0）」](CLAUDE.md#受け入れ基準v010)
 - 既知の問題と制限: [docs/known-issues.md](docs/known-issues.md)

@@ -4,9 +4,9 @@
 
 ---
 
-## [Unreleased]
+## [0.1.0] - 2026-08-04
 
-v0.1.0 に向けた最初の開発サイクル。**まだリリースしていません**（タグも配布物もありません）。達成状況は [CLAUDE.md の受け入れ基準](CLAUDE.md#受け入れ基準v010)、残っている制限は [docs/known-issues.md](docs/known-issues.md) を参照してください。
+最初のリリース。受け入れ基準の達成状況は [CLAUDE.md の受け入れ基準](CLAUDE.md#受け入れ基準v010)、残っている制限は [docs/known-issues.md](docs/known-issues.md) を参照してください。
 
 ### 追加
 

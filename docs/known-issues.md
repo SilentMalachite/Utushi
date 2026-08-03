@@ -69,8 +69,13 @@ macOS 上での目視確認は 2026-08-04 に開発者が実施済みです（�
 
 ### 配布物に署名や公証をしていない
 
-コード署名も、macOS の公証（notarization）も行っていません。CI が生成するアーティファクト（`utsushi-macos-arm64` / `utsushi-windows-x64`）をそのまま実行すると、macOS では Gatekeeper に、Windows では SmartScreen に警告されます。
+コード署名も、macOS の公証（notarization）も行っていません。Releases に添付した配布物をそのまま実行すると、macOS では Gatekeeper、Windows では SmartScreen に警告されます。
 
-タグ付きリリースもまだ作成していません。現時点での入手手段はソースからのビルド（[build.md](build.md)）か、CI アーティファクトのダウンロードです。
+開き方:
+
+- **macOS**: `utsushi.app` を右クリック（または Control + クリック）して「開く」を選び、確認ダイアログで「開く」を押します。ダブルクリックでは開けません。コマンドで隔離属性を外すこともできます: `xattr -d com.apple.quarantine /path/to/utsushi.app`
+- **Windows**: SmartScreen の画面で「詳細情報」→「実行」を選びます。
+
+警告そのものは正当です。**このアプリが誰によってビルドされたものかを OS が検証できない**という意味であり、署名を導入するまで消えません。信用できない場合はソースからビルドしてください（[build.md](build.md)）。
 
 なお、Qt を環境から取り除いたクリーンな状態で配布物が起動することは、両 OS の CI で継続的に検証しています。
