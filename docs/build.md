@@ -218,7 +218,7 @@ windeployqt dist/windows/utsushi.exe
 5. **Qt を環境から取り除いた状態で実際に起動すること**（両 OS）
 6. アーティファクトのアップロード（`utsushi-macos-arm64` / `utsushi-windows-x64`）
 
-CI に含めていないもの: clang-tidy（上記の理由）、GUI の目視確認（[known-issues.md](known-issues.md#gui-の目視確認が未実施)）。
+CI に含めていないもの: clang-tidy（上記の理由）、GUI の目視確認（[known-issues.md](known-issues.md#windows-での-gui-確認が未実施)）。
 
 ---
 
