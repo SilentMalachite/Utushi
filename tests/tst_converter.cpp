@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QImage>
 #include <QPainter>
@@ -7,6 +8,7 @@
 #include <QPdfWriter>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QThread>
 
 #include "core/conversion_job.hpp"
 #include "core/converter.hpp"
@@ -341,6 +343,68 @@ private slots:
         QCOMPARE(summary.succeededPages, 1);
         QVERIFY(QFileInfo::exists(dir.path() + u"/doc_p001.png"_s));   // 途中結果は残る
         QVERIFY(!QFileInfo::exists(dir.path() + u"/doc_p003.png"_s));
+    }
+
+    // 受け入れ基準「変換中にキャンセルすると 1 秒以内にワーカーが停止し、途中までの
+    // PNG は残る」の時間境界そのものを実証する。cancelStopsAtPageBoundary() は run() を
+    // テストと同じスレッドで呼ぶため「次のページへ進まない」ことしか示せず、UI から
+    // キャンセルを押してからワーカーが実際に止まるまでの時間は測れない。ここでは
+    // MainWindow と同じ構成（ワーカースレッドへ moveToThread した Converter に、別
+    // スレッドから std::atomic 経由で requestCancel）で、その所要時間を測る。
+    void cancelFromAnotherThreadStopsWithinOneSecond() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        // キャンセルを送る時点でまだ大量のページが残っている状態にする。全ページが
+        // 終わってしまうと cancelled が立たず、時間も測れない。
+        const QString pdf = writeSamplePdf(dir.path(), u"many.pdf"_s, 100);
+
+        ConversionJob job;
+        job.inputPdfPath = pdf;
+        job.outputDirPath = dir.path();
+        job.dpi = 150.0;
+
+        QThread worker;
+        // MainWindow と同じ所有権の受け渡し: 親を持たせず moveToThread し、スレッド
+        // 終了時に deleteLater でワーカースレッド側から破棄する。
+        auto* converter = new Converter;
+        converter->moveToThread(&worker);
+        connect(&worker, &QThread::finished, converter, &QObject::deleteLater);
+        QSignalSpy pageSpy(converter, &Converter::pageDone);
+        QSignalSpy finishedSpy(converter, &Converter::finished);
+        worker.start();
+
+        // QVERIFY 系はアサート失敗で即 return するため、その経路でもワーカーを必ず
+        // 止める。走ったままの QThread が破棄されると qFatal でテストバイナリ全体が
+        // 落ち、後続のテストが 1 本も実行されなくなる。
+        // converter はスレッド終了時に deleteLater で破棄されるので、requestCancel()
+        // は quit()/wait() より先に呼ぶ（このガードより後に converter へ触らない）。
+        struct WorkerStopper {
+            QThread& thread;
+            Converter* converter;
+            ~WorkerStopper() {
+                converter->requestCancel();
+                thread.quit();
+                thread.wait();
+            }
+        } stopper{worker, converter};
+
+        QMetaObject::invokeMethod(converter, [converter, job] { converter->run({job}); });
+
+        // 実際に変換が始まってからキャンセルする。開始前のキャンセルは
+        // cancelRequestedBeforeRunIsHonored() が別途カバーしている。
+        QTRY_VERIFY_WITH_TIMEOUT(pageSpy.count() > 0, 15000);
+
+        QElapsedTimer sinceCancel;
+        sinceCancel.start();
+        converter->requestCancel();
+        QTRY_VERIFY_WITH_TIMEOUT(finishedSpy.count() > 0, 5000);
+        const qint64 stopMs = sinceCancel.elapsed();
+
+        const auto summary = lastSummary(finishedSpy);
+        QVERIFY(summary.cancelled);
+        QVERIFY2(stopMs < 1000, qPrintable(u"停止までに %1 ms かかった"_s.arg(stopMs)));
+        QVERIFY(QFileInfo::exists(dir.path() + u"/many_p001.png"_s));   // 途中結果は残る
+        QVERIFY(!QFileInfo::exists(dir.path() + u"/many_p100.png"_s));
     }
 
     // Fix wave 2, finding 1: 別ディレクトリにある同名 stem の 2 ファイルが同じ出力先へ
